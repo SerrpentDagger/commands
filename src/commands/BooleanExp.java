@@ -38,6 +38,26 @@ public class BooleanExp
 			return bool.eval(a, b);
 		}
 		
+		public static Comp parse(String str)
+		{
+			switch(str.toLowerCase())
+			{
+				case "=":
+					return EQUAL;
+				case "==":
+					return EQUAL;
+				case "<":
+					return LESS;
+				case "<=":
+					return LESS_EQ;
+				case ">":
+					return MORE;
+				case ">=":
+					return MORE_EQ;
+			}
+			return null;
+		}
+		
 		///////////
 		
 		private static interface Bool

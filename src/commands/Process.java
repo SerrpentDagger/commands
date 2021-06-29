@@ -14,8 +14,8 @@ public class Process
 		return this;
 	}
 	
-	public void run()
+	public void run(Script ctx)
 	{
-		process.forEach((cmd) -> cmd.run());
+		process.forEach((cmd) -> cmd.run(ctx));
 	}
 }
