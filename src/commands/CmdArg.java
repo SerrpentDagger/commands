@@ -1,11 +1,19 @@
 package commands;
 
+import java.awt.Color;
 import java.lang.reflect.Array;
 
 import commands.BooleanExp.Comp;
 
 public abstract class CmdArg<T>
 {
+	public final String type;
+	public CmdArg(String type)
+	{
+		this.type = type;
+	}
+	
+	public boolean rawToken(int ind) { return false; }
 	public int tokenCount() { return 1; }
 	public abstract T parse(String trimmed);
 	public T parse(String[] tokens, int off)
@@ -20,7 +28,7 @@ public abstract class CmdArg<T>
 	
 	///////////////////////
 	
-	public static final CmdArg<Command> COMMAND = new CmdArg<Command>()
+	public static final CmdArg<Command> COMMAND = new CmdArg<Command>("Command")
 	{
 		@Override
 		public Command parse(String trimmed)
@@ -29,7 +37,29 @@ public abstract class CmdArg<T>
 		}
 	};
 	
-	public static final CmdArg<Integer> INT = new CmdArg<Integer>()
+	public static final CmdArg<Color> COLOR = new CmdArg<Color>("Color")
+	{
+		@Override
+		public int tokenCount()
+		{
+			return 3;
+		}
+		
+		@Override
+		public Color parse(String trimmed)
+		{
+			Double r, g, b;
+			String[] tokens = Script.tokensOf(trimmed);
+			r = DOUBLE.parse(tokens, 0);
+			g = DOUBLE.parse(tokens, 1);
+			b = DOUBLE.parse(tokens, 2);
+			if (r == null || g == null || b == null)
+				return null;
+			return new Color(r.floatValue(), g.floatValue(), b.floatValue());
+		}
+	};
+	
+	public static final CmdArg<Integer> INT = new CmdArg<Integer>("Integer")
 	{
 		@Override
 		public Integer parse(String trimmed)
@@ -44,7 +74,7 @@ public abstract class CmdArg<T>
 		}
 	};
 	
-	public static final CmdArg<Double> DOUBLE = new CmdArg<Double>()
+	public static final CmdArg<Double> DOUBLE = new CmdArg<Double>("Double")
 	{	
 		@Override
 		public Double parse(String trimmed)
@@ -59,7 +89,7 @@ public abstract class CmdArg<T>
 		}
 	};
 	
-	public static final CmdArg<String> TOKEN = new CmdArg<String>()
+	public static final CmdArg<String> TOKEN = new CmdArg<String>("Token")
 	{
 		@Override
 		public String parse(String trimmed)
@@ -68,7 +98,7 @@ public abstract class CmdArg<T>
 		}
 	};
 	
-	public static final CmdArg<String> STRING = new CmdArg<String>()
+	public static final CmdArg<String> STRING = new CmdArg<String>("String")
 	{
 		@Override
 		public int tokenCount()
@@ -82,60 +112,8 @@ public abstract class CmdArg<T>
 			return trimmed;
 		}
 	};
-/*	
-	public static final CmdArg<int[]> INT_ARRAY = new CmdArg<int[]>()
-	{
-		@Override
-		public int tokenCount()
-		{
-			return 0;
-		}
-		
-		@Override
-		public int[] parse(String trimmed)
-		{
-			try
-			{
-				String[] tokens = trimmed.split(" ");
-				int[] vals = new int[tokens.length];
-				for (int i = 0; i < tokens.length; i++)
-				{
-					vals[i] = Math.round(Math.round(Double.parseDouble(tokens[i])));
-				}
-			}
-			catch (NumberFormatException e)
-			{}
-			return null;
-		}
-	};
 	
-/*	public static final CmdArg<double[]> DOUBLE_ARRAY = new CmdArg<double[]>()
-	{
-		@Override
-		public int tokenCount()
-		{
-			return 0;
-		}
-		
-		@Override
-		public double[] parse(String trimmed)
-		{
-			try
-			{
-				String[] tokens = trimmed.split(" ");
-				double[] vals = new double[tokens.length];
-				for (int i = 0; i < tokens.length; i++)
-				{
-					vals[i] = Double.parseDouble(tokens[i]);
-				}
-			}
-			catch (NumberFormatException e)
-			{}
-			return null;
-		}
-	}; */
-	
-	public static final CmdArg<Boolean> BOOLEAN = new CmdArg<Boolean>()
+	public static final CmdArg<Boolean> BOOLEAN = new CmdArg<Boolean>("Boolean")
 	{
 		@Override
 		public Boolean parse(String trimmed)
@@ -152,7 +130,7 @@ public abstract class CmdArg<T>
 		}
 	};
 	
-	public static final CmdArg<BooleanThen> BOOLEAN_THEN = new CmdArg<BooleanThen>()
+	public static final CmdArg<BooleanThen> BOOLEAN_THEN = new CmdArg<BooleanThen>("Boolean Then")
 	{
 		@Override
 		public int tokenCount()
@@ -169,7 +147,7 @@ public abstract class CmdArg<T>
 		}
 	};
 	
-	public static final CmdArg<BooleanExp> BOOLEAN_EXP = new CmdArg<BooleanExp>()
+	public static final CmdArg<BooleanExp> BOOLEAN_EXP = new CmdArg<BooleanExp>("Double Comparator Double")
 	{
 		@Override
 		public int tokenCount()
@@ -196,12 +174,39 @@ public abstract class CmdArg<T>
 		}
 	};
 	
+	public static final CmdArg<VarSet> VAR_SET = new CmdArg<VarSet>("VarName Token")
+	{
+		@Override
+		public boolean rawToken(int ind)
+		{
+			return ind == 0;
+		}
+		
+		@Override
+		public int tokenCount()
+		{
+			return 2;
+		}
+		
+		@Override
+		public VarSet parse(String trimmed)
+		{
+			String v, s;
+			String[] tokens = Script.tokensOf(trimmed);
+			v = TOKEN.parse(tokens, 0);
+			s = TOKEN.parse(tokens, 1);
+			if (v == null || s == null)
+				return null;
+			return new VarSet(v, s);
+		}
+	};
+	
 	////////////////////////////////////////
 	
 	public static <X> CmdArg<X[]> greedyArray(CmdArg<X> arg)
 	{
 		CmdArg<X[]> array = arrayOf(arg);
-		CmdArg<X[]> greedy = new CmdArg<X[]>()
+		CmdArg<X[]> greedy = new CmdArg<X[]>(arg.type + "...")
 		{
 			@Override
 			public int tokenCount()
@@ -221,7 +226,7 @@ public abstract class CmdArg<T>
 	
 	public static <X> CmdArg<X[]> arrayOf(CmdArg<X> arg)
 	{
-		CmdArg<X[]> array = new CmdArg<X[]>()
+		CmdArg<X[]> array = new CmdArg<X[]>(Script.ARR_S + arg.type + Script.ARR_E)
 		{
 			@Override
 			public int tokenCount()

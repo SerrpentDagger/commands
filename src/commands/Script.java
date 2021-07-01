@@ -1,10 +1,18 @@
 package commands;
 
+import java.awt.AWTException;
+import java.awt.Robot;
+import java.awt.event.KeyEvent;
 import java.io.File;
 import java.io.FileNotFoundException;
+import java.lang.reflect.Array;
+import java.lang.reflect.Field;
 import java.util.ArrayDeque;
 import java.util.HashMap;
+import java.util.Map.Entry;
 import java.util.Scanner;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import commands.Command.RunnableCommand;
 
@@ -20,6 +28,7 @@ public class Script
 	public static final char ARR_S = '[', ARR_E = ']';
 	public static final String INDEX = "INDEX";
 	public static final int NO_LABEL = -2;
+	public static final char UNRAW = '%';
 	
 	public int parseLine = -1;
 	private final HashMap<String, String> vars = new HashMap<String, String>();
@@ -28,6 +37,7 @@ public class Script
 	public String path;
 	public final String[] lines;
 	private Scanner scan;
+	private final Robot rob;
 	
 	public static Command get(String name)
 	{
@@ -42,13 +52,50 @@ public class Script
 		return cmd;
 	}
 	
+	public static String[] getAllCmds()
+	{
+		return CMDS.keySet().toArray(new String[CMDS.size()]);
+	}
+	
+	public static CmdArg<?>[][] getAllCmdArgs()
+	{
+		Set<Entry<String, Command>> entries = CMDS.entrySet();
+		@SuppressWarnings("unchecked")
+		Entry<String, Command>[] entA = (Entry<String, Command>[]) Array.newInstance(Entry.class, entries.size());
+		
+		CmdArg<?>[][] sets = new CmdArg<?>[entries.size()][];
+		for (int i = 0; i < sets.length; i++)
+		{
+			Command cmd = entA[i].getValue();
+			sets[i] = cmd.args;
+		}
+		
+		return sets;
+	}
+	
+	public static String[][] cmdTypePairs()
+	{
+		Set<Entry<String, Command>> entries = CMDS.entrySet();
+		String[][] str = new String[entries.size()][];
+		
+		AtomicInteger i = new AtomicInteger(0);
+		entries.forEach((ent) ->
+		{
+			str[i.get()] = new String[] { ent.getKey(), ent.getValue().getArgInfo() };
+			i.incrementAndGet();
+		});
+		
+		return str;
+	}
+	
 	/////////////////////////////////////////////
 	
-	public static final Command VAR = add("var", CmdArg.TOKEN, CmdArg.STRING).setFunc((ctx, objs) ->
+	public static final Command VAR = add("var", CmdArg.VAR_SET).setFunc((ctx, objs) ->
 	{
-		ctx.putVar((String) objs[0], (String) objs[1]);
-		return (String) objs[1];
-	}).rawVars(0);
+		VarSet var = (VarSet) objs[0];
+		ctx.putVar(var.var, var.set);
+		return var.set;
+	});
 	public static final Command PRINT = add("print", CmdArg.STRING).setFunc((ctx, objs) ->
 	{
 		String str = (String) objs[0];
@@ -116,7 +163,7 @@ public class Script
 			ctx.putVar(INDEX, "" + i);
 			ctx.runFrom(line);
 		}
-		return ctx.getVar(PREVIOUS);
+		return ctx.prev();
 	});
 	public static final Command WHILE = add("while", CmdArg.BOOLEAN, CmdArg.TOKEN).setFunc((ctx, objs) ->
 	{
@@ -130,14 +177,20 @@ public class Script
 			ctx.runFrom(line);
 			ctx.parseLine = wL - 1;
 		}
-		return ctx.getVar(PREVIOUS);
+		return ctx.prev();
 	});
-	public static final Command GOTO = add("goto", CmdArg.TOKEN).setFunc((ctx, objs) ->
+	public static final Command GOTO = add("goto", CmdArg.TOKEN, CmdArg.greedyArray(CmdArg.VAR_SET)).setFunc((ctx, objs) ->
 	{
 		String label = (String) objs[0];
 		int line = ctx.getLabelLine(label);
 		if (line == NO_LABEL)
 			ctx.parseExcept("Invalid label specification", ctx.parseLine, label, "No label found.");
+		
+		for (int i = 0; i < objs.length; i++)
+		{
+			VarSet var = ((VarSet[]) objs[1])[i];
+			ctx.putVar(var.var, var.set);
+		}
 		
 		ctx.pushStack(line);
 		
@@ -147,15 +200,79 @@ public class Script
 	{
 		return "" + ctx.popStack();
 	});
+	public static final Command SLEEP = add("sleep", CmdArg.INT).setFunc((ctx, objs) ->
+	{
+		try
+		{
+			Thread.sleep((int) objs[0]);
+		}
+		catch (InterruptedException e)
+		{
+			e.printStackTrace();
+		}
+		return "" + (int) objs[0];
+	});
+
+	public static final Command MOUSE_MOVE = add("mouse_move", CmdArg.INT, CmdArg.INT).setFunc((ctx, objs) ->
+	{
+		ctx.rob.mouseMove((int) objs[0], (int) objs[1]);
+		return ctx.prev();
+	});
 	
-	public static double operate(double start, Object[] numArray, Operator op)
+	public static final Command KEY_PRESS = keyCommand("key_press", (key, ctx, objs) ->
+	{
+		ctx.rob.keyPress(key);
+	}, CmdArg.TOKEN);
+	
+	public static final Command KEY_RELEASE = keyCommand("key_release", (key, ctx, objs) ->
+	{
+		ctx.rob.keyRelease(key);
+	}, CmdArg.TOKEN);
+	
+	public static final Command KEY = keyCommand("key", (key, ctx, objs) ->
+	{
+		ctx.rob.keyPress(key);
+		ctx.rob.delay((int) objs[1]);
+		ctx.rob.keyRelease(key);
+	}, CmdArg.TOKEN, CmdArg.DOUBLE);
+	
+	private static Command keyCommand(String name, KeyFunc k, CmdArg<?>... args)
+	{
+		return add(name, args).setFunc((ctx, objs) ->
+		{
+			try
+			{
+				String key = (String) objs[0];
+				Field field = keyCode(key);
+				k.key(field.getInt(field), ctx, objs);
+				return "" + true;
+			}
+			catch (NoSuchFieldException | IllegalArgumentException | IllegalAccessException e)
+			{
+				e.printStackTrace();
+				return "" + false;
+			}
+		});
+	}
+	private static Field keyCode(String letter) throws NoSuchFieldException
+	{
+		return KeyEvent.class.getField("VK_" + letter.toUpperCase());
+	}
+	@FunctionalInterface
+	private static interface KeyFunc
+	{
+		public void key(int key, Script ctx, Object[] objs);
+	}
+	
+	private static double operate(double start, Object[] numArray, Operator op)
 	{
 		double all = start;
 		for (Object doub : numArray)
 			all = op.operate(all, (double) doub);
 		return all;
 	}
-	public static interface Operator
+	@FunctionalInterface
+	private static interface Operator
 	{
 		public double operate(double all, double next);
 	}
@@ -174,15 +291,21 @@ public class Script
 		return first;
 	}
 	
-	public String varParse(Command cmd, int index, String token)
+	///////////
+	
+	public String varParse(Command cmd, int argInd, int tokInd, String token)
 	{
-		if (cmd.rawVar[index])
-			return token.trim();
-		String var = getVar(token);
+		String trm = varTrim(token);
+		boolean unraw = token.charAt(0) == UNRAW;
+		if (!unraw && (cmd.rawArg[argInd] || cmd.rawToken(tokInd)))
+			return trm;
+		String var = getVar(trm);
+		if (unraw)
+			return varParse(cmd, argInd, tokInd, var);
 		if (var != null)
-			return arrPreFrom(token) + var.trim() + arrPostFrom(token);
+			return arrPreFrom(token) + var + arrPostFrom(token);
 		else
-			return token.trim();
+			return trm;
 	}
 	private String arrPreFrom(String token)
 	{
@@ -208,6 +331,10 @@ public class Script
 		}
 		return post;
 	}
+	private String varTrim(String str)
+	{
+		return str.trim().replaceFirst("" + UNRAW, "");
+	}
 	
 	public RunnableCommand parse(String line)
 	{
@@ -224,6 +351,7 @@ public class Script
 				CmdArg<?>[] args = cmd.args;
 				Object[] objs = new Object[args.length];
 				int tok = 1;
+				String token = "";
 				for (int argInd = 0; argInd < args.length; argInd++)
 				{
 					CmdArg<?> arg = args[argInd];
@@ -235,34 +363,34 @@ public class Script
 						if (tks <= tok)
 							parseExcept("Missing tokens", parseLine, line, name + " requires " + tks + " args.");
 
-						trimmed += varParse(cmd, argInd, tokens[tok]) + " ";
+						trimmed += varParse(cmd, argInd, tok, token = tokens[tok]) + " ";
 						tok++;
 					}
 					if (count == -1)
 					{
 						if (tokens.length == tok)
 							parseExcept("Missing array tokens", parseLine, line, name);
-						if (!tokens[tok].startsWith("" + ARR_S))
-							parseExcept("Argument must be an array", parseLine, line, tokens[tok]);
+						if (!(token = tokens[tok]).startsWith("" + ARR_S))
+							parseExcept("Argument must be an array", parseLine, line, token);
 						int arrCount = 0;
 						do
 						{
-							if (tokens[tok].startsWith("" + ARR_S))
+							if (token.startsWith("" + ARR_S))
 								arrCount++;
-							if (tokens[tok].endsWith("" + ARR_E))
+							if (token.endsWith("" + ARR_E))
 								arrCount--;
-							String var = varParse(cmd, argInd, tokens[tok]);
+							String var = varParse(cmd, argInd, tok, token);
 							trimmed += var + " ";
 							tok++;
 						} while (arrCount > 0);
 					}
-					if (count == -2)
+					else if (count == -2)
 					{
 						if (tokens.length == tok)
 							parseExcept("Missing array tokens", parseLine, line, name);
 						while (tok < tks)
 						{
-							String var = varParse(cmd, argInd, tokens[tok]);
+							String var = varParse(cmd, argInd, tok, token = tokens[tok]);
 							trimmed += var + " ";
 							tok++;
 						}
@@ -271,12 +399,12 @@ public class Script
 					trimmed = trimmed.trim();
 					Object obj = arg.parse(trimmed);
 					if (obj == null)
-						parseExcept("Invalid token resolution", parseLine, trimmed, tokens[tok - 1]);
+						parseExcept("Invalid token resolution", parseLine, trimmed, token);
 					objs[argInd] = obj;
 				}
 
 				if (tok != tks && !tokens[tok].startsWith(COMMENT))
-					parseExcept("Unused token", parseLine, tokens[tok], tokens[tok]);
+					parseExcept("Unused token", parseLine, tokens[tok], token);
 				
 				RunnableCommand run = new RunnableCommand(cmd, objs);
 				return run;
@@ -300,13 +428,14 @@ public class Script
 	
 	////////////////////////////////////////////////
 	
-	public Script(String str)
+	public Script(String str) throws AWTException
 	{
 		this(new Scanner(str));
 	}
 	
-	public Script(Scanner scan)
+	public Script(Scanner scan) throws AWTException
 	{
+		rob = new Robot();
 		path = null;
 		String str = "";
 		int num = 0;
@@ -326,7 +455,7 @@ public class Script
 		scan.close();
 	}
 	
-	public Script(File script) throws FileNotFoundException
+	public Script(File script) throws FileNotFoundException, AWTException
 	{
 		this(new Scanner(script));
 		this.path = script.getAbsolutePath();
@@ -382,6 +511,10 @@ public class Script
 	public String getVar(String name)
 	{
 		return vars.get(arrayTrim(name));
+	}
+	public String prev()
+	{
+		return vars.get(PREVIOUS);
 	}
 	private String arrayTrim(String token)
 	{

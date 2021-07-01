@@ -2,7 +2,7 @@ package commands;
 
 public class Command
 {
-	boolean[] rawVar;
+	boolean[] rawArg;
 	String name;
 	CmdArg<?>[] args;
 	CmdFunc func;
@@ -11,7 +11,7 @@ public class Command
 	{
 		this.name = name;
 		this.args = args;
-		rawVar = new boolean[args.length];
+		rawArg = new boolean[args.length];
 	}
 	
 	public Command setFunc(CmdFunc func)
@@ -20,11 +20,33 @@ public class Command
 		return this;
 	}
 	
-	public Command rawVars(int... indices)
+	public Command rawArg(int... indices)
 	{
 		for (int i : indices)
-			rawVar[i] = true;
+			rawArg[i] = true;
 		return this;
+	}
+	
+	public boolean rawToken(int ind)
+	{
+		int i = 0;
+		for (int j = 0; j < args.length; j++)
+		{
+			int count = args[j].tokenCount();
+			if (i + count > ind)
+				return args[j].rawToken(ind - i);
+			i += count;
+		}
+		return false;
+	}
+	
+	public String getArgInfo()
+	{
+		String str = "";
+		for (int i = 0; i < args.length; i++)
+			str += args[i].type + (i == args.length - 1 ? "" : ", ");
+		
+		return str;
 	}
 	
 	public static class RunnableCommand
