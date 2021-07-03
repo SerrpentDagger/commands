@@ -19,9 +19,28 @@ public abstract class CmdArg<T>
 	public T parse(String[] tokens, int off)
 	{
 		String str = "";
-		for (int i = 0; i < tokenCount(); i++)
+		int count = tokenCount();
+		if (count > 0)
 		{
-			str += tokens[off + i] + " ";
+			for (int i = 0; i < tokenCount(); i++)
+			{
+				str += tokens[off + i] + " ";
+			}
+		}
+		else if (count == -1)
+		{
+			int arrCount = 0;
+			for (int i = off; i < tokens.length && (i == off || arrCount > 0); i++)
+			{
+				arrCount += Script.arrPreFrom(tokens[i]).length();
+				arrCount -= Script.arrPostFrom(tokens[i]).length();
+				str += tokens[i];
+			}
+		}
+		else if (count == -2)
+		{
+			for (int i = off; i < tokens.length; i++)
+				str += tokens[i] + " ";
 		}
 		return parse(str.trim());
 	}
@@ -98,20 +117,8 @@ public abstract class CmdArg<T>
 		}
 	};
 	
-	public static final CmdArg<String> STRING = new CmdArg<String>("String")
-	{
-		@Override
-		public int tokenCount()
-		{
-			return -2;
-		}
-		
-		@Override
-		public String parse(String trimmed)
-		{
-			return trimmed;
-		}
-	};
+	public static final CmdArg<String[]> STRING = arrayOf(TOKEN);
+	public static final CmdArg<String[]> STRING_GREEDY = greedyArray(TOKEN);
 	
 	public static final CmdArg<Boolean> BOOLEAN = new CmdArg<Boolean>("Boolean")
 	{
@@ -174,7 +181,7 @@ public abstract class CmdArg<T>
 		}
 	};
 	
-	public static final CmdArg<VarSet> VAR_SET = new CmdArg<VarSet>("VarName Token")
+	public static final CmdArg<VarSet> VAR_SET = new CmdArg<VarSet>("VarName Token...")
 	{
 		@Override
 		public boolean rawToken(int ind)
@@ -185,7 +192,7 @@ public abstract class CmdArg<T>
 		@Override
 		public int tokenCount()
 		{
-			return 2;
+			return -2;
 		}
 		
 		@Override
@@ -194,7 +201,7 @@ public abstract class CmdArg<T>
 			String v, s;
 			String[] tokens = Script.tokensOf(trimmed);
 			v = TOKEN.parse(tokens, 0);
-			s = TOKEN.parse(tokens, 1);
+			s = arrayTokenTo(STRING_GREEDY.parse(tokens, 1));
 			if (v == null || s == null)
 				return null;
 			return new VarSet(v, s);
@@ -237,6 +244,8 @@ public abstract class CmdArg<T>
 			@Override
 			public X[] parse(String trimmed)
 			{
+				if (!trimmed.startsWith("" + Script.ARR_S) || !trimmed.endsWith("" + Script.ARR_E))
+					return null;
 				String str = trimmed.substring(1, trimmed.length() - 1);
 				String[] tokens = Script.tokensOf(str);
 				int count = arg.tokenCount();
@@ -271,5 +280,15 @@ public abstract class CmdArg<T>
 		};
 		
 		return array;
+	}
+	
+	public static String arrayTokenTo(String[] tokenString)
+	{
+		String str = "";
+		for (int i = 0; i < tokenString.length; i++)
+		{
+			str += tokenString[i] + (i == tokenString.length - 1 ? "" : " ");
+		}
+		return Script.arrayTrim(str);
 	}
 }

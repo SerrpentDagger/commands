@@ -13,6 +13,8 @@ import java.util.Map.Entry;
 import java.util.Scanner;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 
 import commands.Command.RunnableCommand;
 
@@ -23,12 +25,13 @@ public class Script
 	public static final String LABEL = "--";
 	public static final String PREVIOUS = "PREV";
 	public static final String NULL = "null";
+	public static final String FALSE = "false", TRUE = "true";
 	public static final String END_FLAG = "END";
 	public static final String STORE = "->";
 	public static final char ARR_S = '[', ARR_E = ']';
 	public static final String INDEX = "INDEX";
 	public static final int NO_LABEL = -2;
-	public static final char UNRAW = '%';
+	public static final char UNRAW = '%', RAW = '$';
 	
 	public int parseLine = -1;
 	private final HashMap<String, String> vars = new HashMap<String, String>();
@@ -36,8 +39,30 @@ public class Script
 	private final ArrayDeque<Integer> stack = new ArrayDeque<Integer>();
 	public String path;
 	public final String[] lines;
-	private Scanner scan;
+	private Scanner keyIn;
 	private final Robot rob;
+	private Consumer<String> errorCallback = (err) -> System.err.println(err);
+	private BiConsumer<CommandParseException, String> parseExceptionCallback = (exc, err) -> { exc.printStackTrace(); };
+	private Consumer<Exception> exceptionCallback = (exc) ->
+	{
+		System.err.println("Exception encountered at line: " + (parseLine + 1));
+		exc.printStackTrace();
+	};
+	private Consumer<String[]> userRequest = (vars) ->
+	{
+		for (String var : vars)
+			putVar(var, keyIn.next());
+	};
+	private UserReqType userRequestType = (vars, type, prompt) ->
+	{
+		for (String var : vars)
+		{
+			String in = keyIn.next().trim();
+			if (!putVarType(var, in, type, prompt))
+				return false;
+		}
+		return true;
+	};
 	
 	public static Command get(String name)
 	{
@@ -96,18 +121,58 @@ public class Script
 		ctx.putVar(var.var, var.set);
 		return var.set;
 	});
-	public static final Command PRINT = add("print", CmdArg.STRING).setFunc((ctx, objs) ->
+	public static final Command IS_VAR = add("is_var", CmdArg.greedyArray(CmdArg.TOKEN)).setFunc((ctx, objs) ->
 	{
-		String str = (String) objs[0];
+		String[] vars = (String[]) objs[0];
+		for (String var : vars)
+			if (ctx.getVar(var) == null)
+				return FALSE;
+		return TRUE;
+	});
+	public static final Command IS_NUMBER = add("is_number", CmdArg.greedyArray(CmdArg.TOKEN)).setFunc((ctx, objs) ->
+	{
+		String[] vars = (String[]) objs[0];
+		for (String var : vars)
+		{
+			String val = ctx.getVar(var);
+			if (val == null || CmdArg.DOUBLE.parse(val) == null)
+				return FALSE;
+		}
+		return TRUE;
+	});
+	public static final Command PRINT = add("print", CmdArg.STRING_GREEDY).setFunc((ctx, objs) ->
+	{
+		String str = CmdArg.arrayTokenTo((String[]) objs[0]);
 		System.out.println(str);
 		return str;
 	});
 	public static final Command KEY_IN = add("key_in", CmdArg.TOKEN).setFunc((ctx, objs) ->
 	{
 		System.out.println((String) objs[0] + "?");
-		String next = ctx.scan.next();
+		String next = ctx.keyIn.next();
 		ctx.putVar((String) objs[0], next);
 		return next;
+	});
+	public static final Command USER_REQ = add("user_req", CmdArg.greedyArray(CmdArg.TOKEN)).setFunc((ctx, objs) ->
+	{
+		ctx.userRequest.accept((String[]) objs[0]);
+		return ctx.prev();
+	});
+	
+	public static final Command USER_REQ_INT = userReqType("user_req_int", CmdArg.INT, "integer");
+	public static final Command USER_REQ_DOUBLE = userReqType("user_req_double", CmdArg.DOUBLE, "double");
+	public static final Command USER_REQ_STRING = userReqType("user_req_string", CmdArg.STRING_GREEDY, "text");
+	public static final Command USER_REQ_BOOL = userReqType("user_req_bool", CmdArg.BOOLEAN, "boolean");
+	public static final Command USER_REQ_TOKEN = userReqType("user_req_token", CmdArg.TOKEN, "token");
+	
+	public static final Command CONCAT = add("concat", CmdArg.greedyArray(CmdArg.STRING)).setFunc((ctx, objs) ->
+	{
+		String out = "";
+		for (String[] tokArr : (String[][]) objs[0])
+		{
+			out += CmdArg.arrayTokenTo(tokArr);
+		}
+		return out;
 	});
 	public static final Command ADD = add("add", CmdArg.greedyArray(CmdArg.DOUBLE)).setFunc((ctx, objs) ->
 	{
@@ -157,7 +222,7 @@ public class Script
 		String label = (String) objs[1];
 		int line = ctx.getLabelLine(label);
 		if (line == NO_LABEL)
-			ctx.parseExcept("Invalid label specification", ctx.parseLine, label, "No label found.");
+			ctx.parseExcept("Invalid label specification", label, "No label found.");
 		for (int i = 0; i < count; i++)
 		{
 			ctx.putVar(INDEX, "" + i);
@@ -171,7 +236,7 @@ public class Script
 		int wL = ctx.parseLine;
 		int line = ctx.getLabelLine((String) objs[1]);
 		if (line == NO_LABEL)
-			ctx.parseExcept("Invalid label specification", ctx.parseLine, (String) objs[1], "No label found.");
+			ctx.parseExcept("Invalid label specification", (String) objs[1], "No label found.");
 		if (bool)
 		{
 			ctx.runFrom(line);
@@ -184,7 +249,7 @@ public class Script
 		String label = (String) objs[0];
 		int line = ctx.getLabelLine(label);
 		if (line == NO_LABEL)
-			ctx.parseExcept("Invalid label specification", ctx.parseLine, label, "No label found.");
+			ctx.parseExcept("Invalid label specification", label, "No label found.");
 		
 		for (int i = 0; i < objs.length; i++)
 		{
@@ -277,6 +342,22 @@ public class Script
 		public double operate(double all, double next);
 	}
 	
+	private static Command userReqType(String name, CmdArg<?> type, String userPromptType)
+	{
+		return add(name, CmdArg.greedyArray(CmdArg.TOKEN)).setFunc((ctx, objs) ->
+		{
+			if (ctx.userRequestType.reqType((String[]) objs[0], type, userPromptType))
+				return TRUE;
+			else
+				return FALSE;
+		});
+	}
+	@FunctionalInterface
+	private static interface UserReqType
+	{
+		public boolean reqType(String[] vars, CmdArg<?> type, String userPromptType);
+	}
+	
 	/////////////////////////////////////////////
 	
 	public static String[] tokensOf(String str)
@@ -297,7 +378,8 @@ public class Script
 	{
 		String trm = varTrim(token);
 		boolean unraw = token.charAt(0) == UNRAW;
-		if (!unraw && (cmd.rawArg[argInd] || cmd.rawToken(tokInd)))
+		boolean raw = token.charAt(0) == RAW;
+		if (raw || (!unraw && (cmd.rawArg[argInd] || cmd.rawToken(tokInd))))
 			return trm;
 		String var = getVar(trm);
 		if (unraw)
@@ -307,7 +389,7 @@ public class Script
 		else
 			return trm;
 	}
-	private String arrPreFrom(String token)
+	public static String arrPreFrom(String token)
 	{
 		String pre = "";
 		for (int i = 0; i < token.length(); i++)
@@ -319,7 +401,7 @@ public class Script
 		}
 		return pre;
 	}
-	private String arrPostFrom(String token)
+	public static String arrPostFrom(String token)
 	{
 		String post = "";
 		for (int i = token.length() - 1; i >= 0; i--)
@@ -333,7 +415,7 @@ public class Script
 	}
 	private String varTrim(String str)
 	{
-		return str.trim().replaceFirst("" + UNRAW, "");
+		return str.trim().replaceFirst("" + UNRAW, "").replaceFirst("" + RAW, "");
 	}
 	
 	public RunnableCommand parse(String line)
@@ -361,7 +443,7 @@ public class Script
 					for (int tokInArg = 0; tokInArg < count; tokInArg++)
 					{
 						if (tks <= tok)
-							parseExcept("Missing tokens", parseLine, line, name + " requires " + tks + " args.");
+							parseExcept("Missing tokens", line, name + " requires " + tks + " args.");
 
 						trimmed += varParse(cmd, argInd, tok, token = tokens[tok]) + " ";
 						tok++;
@@ -369,9 +451,9 @@ public class Script
 					if (count == -1)
 					{
 						if (tokens.length == tok)
-							parseExcept("Missing array tokens", parseLine, line, name);
+							parseExcept("Missing array tokens", line, name);
 						if (!(token = tokens[tok]).startsWith("" + ARR_S))
-							parseExcept("Argument must be an array", parseLine, line, token);
+							parseExcept("Argument must be an array", line, token);
 						int arrCount = 0;
 						do
 						{
@@ -387,7 +469,7 @@ public class Script
 					else if (count == -2)
 					{
 						if (tokens.length == tok)
-							parseExcept("Missing array tokens", parseLine, line, name);
+							parseExcept("Missing array tokens", line, name);
 						while (tok < tks)
 						{
 							String var = varParse(cmd, argInd, tok, token = tokens[tok]);
@@ -399,30 +481,35 @@ public class Script
 					trimmed = trimmed.trim();
 					Object obj = arg.parse(trimmed);
 					if (obj == null)
-						parseExcept("Invalid token resolution", parseLine, trimmed, token);
+						parseExcept("Invalid token resolution", trimmed, token);
 					objs[argInd] = obj;
 				}
 
 				if (tok != tks && !tokens[tok].startsWith(COMMENT))
-					parseExcept("Unused token", parseLine, tokens[tok], token);
+					parseExcept("Unused token", tokens[tok], token);
 				
 				RunnableCommand run = new RunnableCommand(cmd, objs);
 				return run;
 			}
 			else
-				parseExcept("Unknown command", parseLine, name);
+				parseExcept("Unknown command", name);
 		}
 		return null;
 	}
 	
-	private void parseExcept(String preAt, int line, String postLine)
+	public void error(String message)
 	{
-		parseExcept(preAt, line, postLine, null);
+		this.errorCallback.accept(message);
 	}
 	
-	private void parseExcept(String preAt, int line, String postLine, String extra)
+	public void parseExcept(String preAt, String postLine)
 	{
-		throw new CommandParseException(preAt + " at line " + (line + 1) + ": " + postLine + ", from: " + lines[line]
+		parseExcept(preAt, postLine, null);
+	}
+	
+	public void parseExcept(String preAt, String postLine, String extra)
+	{
+		throw new CommandParseException(preAt + " at line " + (parseLine + 1) + ": " + postLine + ", from: " + lines[parseLine]
 				+ (extra == null ? "" : ", extra info: " + extra));
 	}
 	
@@ -463,9 +550,20 @@ public class Script
 	
 	public void run()
 	{
-		scan = new Scanner(System.in);
-		runFrom(-1);
-		scan.close();
+		try
+		{
+			keyIn = new Scanner(System.in);
+			runFrom(-1);
+			keyIn.close();
+		}
+		catch (CommandParseException e)
+		{
+			this.parseExceptionCallback.accept(e, e.getMessage());
+		}
+		catch (Exception e)
+		{
+			this.exceptionCallback.accept(e);
+		}
 	}
 	public void runFrom(int start)
 	{
@@ -473,11 +571,12 @@ public class Script
 			pushStack(start);
 		else
 			parseLine = 0;
-		if (scan == null)
-			scan = new Scanner(System.in);
+		if (keyIn == null)
+			keyIn = new Scanner(System.in);
 		while(parseLine < lines.length && parseLine != -1)
 		{
 			String line = lines[parseLine];
+			System.out.print("Parsing: " + line);
 			if (line.startsWith(COMMENT) || line.isEmpty() || line.startsWith(LABEL))
 			{
 				parseLine++;
@@ -487,6 +586,7 @@ public class Script
 			String[] storing = first.split(STORE);
 			RunnableCommand cmd = parse(line);
 			String out;
+			System.out.println(" ... Done");
 			putVar(PREVIOUS, out = cmd.run(this));
 			for (int i = 1; i < storing.length; i++)
 				putVar(storing[i], out);
@@ -495,13 +595,35 @@ public class Script
 		}
 		parseLine = -1;
 	}
+	public void goTo(String label)
+	{
+		int line = getLabelLine(label);
+		if (line == NO_LABEL)
+			parseExcept("Invalid label specification", label, "No label found.");
+		
+		pushStack(line);
+	}
+	
+	public boolean putVarType(String name, String val, CmdArg<?> type, String prompt)
+	{
+		if (type.parse(val) == null)
+		{
+			error("The input \"" + val + "\" for variable \"" + name + "\" is invalid for type \"" + prompt + "\".");
+			return false;
+		}
+		else
+		{
+			putVar(name, val);
+			return true;
+		}
+	}
 	
 	public void putVar(String name, String val)
 	{
 		try
 		{
 			Double.parseDouble(name);
-			parseExcept("Numerical variable name", parseLine, name);
+			parseExcept("Numerical variable name", name);
 		}
 		catch (NumberFormatException e)
 		{}
@@ -516,7 +638,7 @@ public class Script
 	{
 		return vars.get(PREVIOUS);
 	}
-	private String arrayTrim(String token)
+	public static String arrayTrim(String token)
 	{
 		String str = token;
 		if (str.startsWith("" + ARR_S))
@@ -553,6 +675,30 @@ public class Script
 		parseLine = stack.pop();
 		return parseLine;
 	}
+	
+	///////////////////////
+	
+	public void setErrorCallback(Consumer<String> callback)
+	{
+		this.errorCallback = callback;
+	}
+	
+	public void setExceptionCallback(Consumer<Exception> callback)
+	{
+		this.exceptionCallback = callback;
+	}
+	
+	public void setParseExceptionCallback(BiConsumer<CommandParseException, String> callback)
+	{
+		this.parseExceptionCallback = callback;
+	}
+	
+	public void setUserReqestType(UserReqType reqType)
+	{
+		this.userRequestType = reqType;
+	}
+	
+	//////////////////////
 	
 	public static class CommandParseException extends RuntimeException
 	{
