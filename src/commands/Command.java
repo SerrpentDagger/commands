@@ -2,6 +2,7 @@ package commands;
 
 public class Command
 {
+	private boolean isVarArgs = false;
 	boolean[] rawArg;
 	String name;
 	CmdArg<?>[] args;
@@ -20,6 +21,17 @@ public class Command
 		return this;
 	}
 	
+	public Command setVarArgs()
+	{
+		isVarArgs = true;
+		return this;
+	}
+	
+	public boolean isVarArgs()
+	{
+		return isVarArgs;
+	}
+	
 	public Command rawArg(int... indices)
 	{
 		for (int i : indices)
@@ -27,17 +39,9 @@ public class Command
 		return this;
 	}
 	
-	public boolean rawToken(int ind)
+	public boolean rawToken(int arg, int tok)
 	{
-		int i = 0;
-		for (int j = 0; j < args.length; j++)
-		{
-			int count = args[j].tokenCount();
-			if (i + count > ind)
-				return args[j].rawToken(ind - i);
-			i += count;
-		}
-		return false;
+		return rawArg[arg] || args[arg].rawToken(tok);
 	}
 	
 	public String getArgInfo()
@@ -45,6 +49,9 @@ public class Command
 		String str = "";
 		for (int i = 0; i < args.length; i++)
 			str += args[i].type + (i == args.length - 1 ? "" : ", ");
+		
+		if (isVarArgs)
+			str += "...";
 		
 		return str;
 	}

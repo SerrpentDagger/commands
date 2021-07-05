@@ -20,6 +20,7 @@ public class BooleanExp
 	public static enum Comp
 	{
 		EQUAL((a, b) -> a == b),
+		NOT_EQUAL((a, b) -> a != b),
 		LESS((a, b) -> a < b),
 		LESS_EQ((a, b) -> a <= b),
 		MORE((a, b) -> a > b),
@@ -40,12 +41,16 @@ public class BooleanExp
 		
 		public static Comp parse(String str)
 		{
-			switch(str.toLowerCase())
+			switch(str)
 			{
 				case "=":
 					return EQUAL;
 				case "==":
 					return EQUAL;
+				case "!=":
+					return NOT_EQUAL;
+				case "!":
+					return NOT_EQUAL;
 				case "<":
 					return LESS;
 				case "<=":

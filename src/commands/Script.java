@@ -8,19 +8,22 @@ import java.io.FileNotFoundException;
 import java.lang.reflect.Array;
 import java.lang.reflect.Field;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map.Entry;
 import java.util.Scanner;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.regex.Pattern;
 
 import commands.Command.RunnableCommand;
 
 public class Script
 {
-	private static final HashMap<String, Command> CMDS = new HashMap<String, Command>();
+	private static final LinkedHashMap<String, Command> CMDS = new LinkedHashMap<String, Command>();
 	public static final String COMMENT = "//";
 	public static final String LABEL = "--";
 	public static final String PREVIOUS = "PREV";
@@ -28,7 +31,10 @@ public class Script
 	public static final String FALSE = "false", TRUE = "true";
 	public static final String END_FLAG = "END";
 	public static final String STORE = "->";
-	public static final char ARR_S = '[', ARR_E = ']';
+	public static final char ARR_S = '[', ARR_E = ']', ARR_ACCESS = '.', ARR_SEP = ';';
+	public static final String ARR_LEN = "len";
+	public static final char STRING_CHAR = '"';
+	public static final char ESCAPE_CHAR = '\\';
 	public static final String INDEX = "INDEX";
 	public static final int NO_LABEL = -2;
 	public static final char UNRAW = '%', RAW = '$';
@@ -36,11 +42,13 @@ public class Script
 	public int parseLine = -1;
 	private final HashMap<String, String> vars = new HashMap<String, String>();
 	private final HashMap<String, Integer> labels = new HashMap<String, Integer>();
-	private final ArrayDeque<Integer> stack = new ArrayDeque<Integer>();
+	private final ArrayDeque<StackEntry> stack = new ArrayDeque<StackEntry>();
+	private final ArrayDeque<StackEntry> popped = new ArrayDeque<StackEntry>();
 	public String path;
 	public final String[] lines;
 	private Scanner keyIn;
 	private final Robot rob;
+	private Consumer<String> printCallback = (str) -> System.out.println(str);
 	private Consumer<String> errorCallback = (err) -> System.err.println(err);
 	private BiConsumer<CommandParseException, String> parseExceptionCallback = (exc, err) -> { exc.printStackTrace(); };
 	private Consumer<Exception> exceptionCallback = (exc) ->
@@ -117,19 +125,21 @@ public class Script
 	
 	public static final Command VAR = add("var", CmdArg.VAR_SET).setFunc((ctx, objs) ->
 	{
-		VarSet var = (VarSet) objs[0];
-		ctx.putVar(var.var, var.set);
-		return var.set;
-	});
-	public static final Command IS_VAR = add("is_var", CmdArg.greedyArray(CmdArg.TOKEN)).setFunc((ctx, objs) ->
+		VarSet[] vars = (VarSet[]) objs[0];
+		String out = vars[0].set.raw;
+		for (VarSet var : vars)
+			ctx.putVar(var.var, var.set.raw);
+		return out;
+	}).setVarArgs();
+	public static final Command IS_VAR = add("is_var", CmdArg.TOKEN).setFunc((ctx, objs) ->
 	{
 		String[] vars = (String[]) objs[0];
 		for (String var : vars)
 			if (ctx.getVar(var) == null)
 				return FALSE;
 		return TRUE;
-	});
-	public static final Command IS_NUMBER = add("is_number", CmdArg.greedyArray(CmdArg.TOKEN)).setFunc((ctx, objs) ->
+	}).setVarArgs();
+	public static final Command IS_NUMBER = add("is_number", CmdArg.TOKEN).setFunc((ctx, objs) ->
 	{
 		String[] vars = (String[]) objs[0];
 		for (String var : vars)
@@ -139,59 +149,74 @@ public class Script
 				return FALSE;
 		}
 		return TRUE;
-	});
-	public static final Command PRINT = add("print", CmdArg.STRING_GREEDY).setFunc((ctx, objs) ->
+	}).setVarArgs();
+	public static final Command IS_ARRAY = add("is_array", CmdArg.TOKEN).setFunc((ctx, objs) ->
 	{
-		String str = CmdArg.arrayTokenTo((String[]) objs[0]);
-		System.out.println(str);
-		return str;
+		String[] vars = (String[]) objs[0];
+		for (String var : vars)
+		{
+			if (!ctx.isArray(var))
+				return FALSE;
+		}
+		return TRUE;
+	}).setVarArgs();
+	public static final Command PRINT = add("print", CmdArg.STRING).setFunc((ctx, objs) ->
+	{
+		CmdString str = (CmdString) objs[0];
+		ctx.printCallback.accept(str.unraw);
+		return str.raw;
 	});
 	public static final Command KEY_IN = add("key_in", CmdArg.TOKEN).setFunc((ctx, objs) ->
 	{
-		System.out.println((String) objs[0] + "?");
-		String next = ctx.keyIn.next();
-		ctx.putVar((String) objs[0], next);
+		String[] vars = (String[]) objs[0];
+		String next = NULL;
+		for (String var : vars)
+		{
+			System.out.println(var + "?");
+			next = ctx.keyIn.next();
+			ctx.putVar(var, next);
+		}
 		return next;
-	});
-	public static final Command USER_REQ = add("user_req", CmdArg.greedyArray(CmdArg.TOKEN)).setFunc((ctx, objs) ->
+	}).rawArg(0).setVarArgs();
+	public static final Command USER_REQ = add("user_req", CmdArg.TOKEN).setFunc((ctx, objs) ->
 	{
 		ctx.userRequest.accept((String[]) objs[0]);
 		return ctx.prev();
-	});
+	}).setVarArgs();
 	
 	public static final Command USER_REQ_INT = userReqType("user_req_int", CmdArg.INT, "integer");
 	public static final Command USER_REQ_DOUBLE = userReqType("user_req_double", CmdArg.DOUBLE, "double");
-	public static final Command USER_REQ_STRING = userReqType("user_req_string", CmdArg.STRING_GREEDY, "text");
+	public static final Command USER_REQ_STRING = userReqType("user_req_string", CmdArg.STRING, "text");
 	public static final Command USER_REQ_BOOL = userReqType("user_req_bool", CmdArg.BOOLEAN, "boolean");
 	public static final Command USER_REQ_TOKEN = userReqType("user_req_token", CmdArg.TOKEN, "token");
 	
-	public static final Command CONCAT = add("concat", CmdArg.greedyArray(CmdArg.STRING)).setFunc((ctx, objs) ->
+	public static final Command CONCAT = add("concat", CmdArg.STRING).setFunc((ctx, objs) ->
 	{
-		String out = "";
-		for (String[] tokArr : (String[][]) objs[0])
+		String out = "\"";
+		for (CmdString tokArr : (CmdString[]) objs[0])
 		{
-			out += CmdArg.arrayTokenTo(tokArr);
+			out += tokArr.unraw;
 		}
-		return out;
-	});
-	public static final Command ADD = add("add", CmdArg.greedyArray(CmdArg.DOUBLE)).setFunc((ctx, objs) ->
+		return out + "\"";
+	}).setVarArgs();
+	public static final Command ADD = add("add", CmdArg.DOUBLE).setFunc((ctx, objs) ->
 	{
 		return "" + operate(0, (Object[]) objs[0], (all, next) -> all + next);
-	});
-	public static final Command SUB = add("sub", CmdArg.greedyArray(CmdArg.DOUBLE)).setFunc((ctx, objs) ->
+	}).setVarArgs();
+	public static final Command SUB = add("sub", CmdArg.DOUBLE).setFunc((ctx, objs) ->
 	{
 		Object[] arr = (Object[]) objs[0];
 		return "" + operate((double) arr[0] * 2, arr, (all, next) -> all - next);
-	});
-	public static final Command MULT = add("mult", CmdArg.greedyArray(CmdArg.DOUBLE)).setFunc((ctx, objs) ->
+	}).setVarArgs();
+	public static final Command MULT = add("mult", CmdArg.DOUBLE).setFunc((ctx, objs) ->
 	{
 		return "" + operate(1, (Object[]) objs[0], (all, next) -> all * next);
-	});
-	public static final Command DIVI = add("divi", CmdArg.greedyArray(CmdArg.DOUBLE)).setFunc((ctx, objs) ->
+	}).setVarArgs();
+	public static final Command DIVI = add("divi", CmdArg.DOUBLE).setFunc((ctx, objs) ->
 	{
 		Object[] arr = (Object[]) objs[0];
 		return "" + operate((double) arr[0] * (double) arr[0], arr, (all, next) -> all / next);
-	});
+	}).setVarArgs();
 	public static final Command INCREMENT = add("inc", CmdArg.DOUBLE).setFunc((ctx, objs) ->
 	{
 		return "" + ((double) objs[0] + 1);
@@ -204,18 +229,22 @@ public class Script
 	{
 		return "" + (-(double) objs[0]);
 	});
+	public static final Command NOT = add("not", CmdArg.BOOLEAN).setFunc((ctx, objs) ->
+	{
+		return "" + (!(boolean) objs[0]);
+	});
 	public static final Command COMPARE = add("compare", CmdArg.BOOLEAN_EXP).setFunc((ctx, objs) ->
 	{
 		return "" + ((BooleanExp) objs[0]).eval();
 	});
-	public static final Command IF_THEN_ELSE = add("if", CmdArg.greedyArray(CmdArg.BOOLEAN_THEN)).setFunc((ctx, objs) ->
+	public static final Command IF_THEN_ELSE = add("if", CmdArg.BOOLEAN_THEN).setFunc((ctx, objs) ->
 	{
 		BooleanThen[] ba = (BooleanThen[]) objs[0];
 		for (BooleanThen b : ba)
 			if (b.bool)
 				return b.then;
 		return NULL;
-	});
+	}).setVarArgs();
 	public static final Command FOR = add("for", CmdArg.INT, CmdArg.TOKEN).setFunc((ctx, objs) ->
 	{
 		int count = (int) objs[0];
@@ -226,7 +255,7 @@ public class Script
 		for (int i = 0; i < count; i++)
 		{
 			ctx.putVar(INDEX, "" + i);
-			ctx.runFrom(line);
+			ctx.subRunFrom(line);
 		}
 		return ctx.prev();
 	});
@@ -239,31 +268,32 @@ public class Script
 			ctx.parseExcept("Invalid label specification", (String) objs[1], "No label found.");
 		if (bool)
 		{
-			ctx.runFrom(line);
+			ctx.subRunFrom(line);
 			ctx.parseLine = wL - 1;
 		}
 		return ctx.prev();
 	});
-	public static final Command GOTO = add("goto", CmdArg.TOKEN, CmdArg.greedyArray(CmdArg.VAR_SET)).setFunc((ctx, objs) ->
+	public static final Command GOTO = add("goto", CmdArg.TOKEN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
 	{
 		String label = (String) objs[0];
 		int line = ctx.getLabelLine(label);
 		if (line == NO_LABEL)
 			ctx.parseExcept("Invalid label specification", label, "No label found.");
 		
-		for (int i = 0; i < objs.length; i++)
+		for (int i = 0; i < ((VarSet[]) objs[1]).length; i++)
 		{
 			VarSet var = ((VarSet[]) objs[1])[i];
-			ctx.putVar(var.var, var.set);
+			ctx.putVar(var.var, var.set.raw);
 		}
 		
-		ctx.pushStack(line);
+		ctx.pushStack(line, true);
 		
 		return "" + line;
-	});
+	}).setVarArgs();
 	public static final Command RETURN = add("return").setFunc((ctx, objs) ->
 	{
-		return "" + ctx.popStack();
+		ctx.popStack();
+		return ctx.prev();
 	});
 	public static final Command SLEEP = add("sleep", CmdArg.INT).setFunc((ctx, objs) ->
 	{
@@ -344,26 +374,160 @@ public class Script
 	
 	private static Command userReqType(String name, CmdArg<?> type, String userPromptType)
 	{
-		return add(name, CmdArg.greedyArray(CmdArg.TOKEN)).setFunc((ctx, objs) ->
+		return add(name, CmdArg.TOKEN).setFunc((ctx, objs) ->
 		{
 			if (ctx.userRequestType.reqType((String[]) objs[0], type, userPromptType))
 				return TRUE;
 			else
 				return FALSE;
-		});
+		}).setVarArgs();
 	}
 	@FunctionalInterface
-	private static interface UserReqType
+	public static interface UserReqType
 	{
 		public boolean reqType(String[] vars, CmdArg<?> type, String userPromptType);
 	}
 	
 	/////////////////////////////////////////////
 	
-	public static String[] tokensOf(String str)
+	public boolean isArray(String token)
 	{
-		return str.trim().split(" ");
+		String var = getVar(token);
+		if (var != null)
+			return isArray(var);
+		
+		return token.startsWith("" + ARR_S) && token.endsWith("" + ARR_E);
 	}
+	public boolean isString(String token)
+	{
+		String var = getVar(token);
+		if (var != null)
+			return isString(var);
+		
+		return token.startsWith("" + STRING_CHAR) && token.endsWith("" + STRING_CHAR);
+	}
+	
+	public static String[] argsOf(String line)
+	{
+		line = line.trim();
+		String str = "";
+		for (int i = 0; i < line.length(); i++)
+		{
+			char parse = line.charAt(i);
+			if (parse == ' ')
+				break;
+			else
+				str += parse;
+		}
+		line = line.replaceFirst(quote(str), "");
+		
+		ArrayList<String> args = new ArrayList<String>();
+		
+		String arg = "";
+		int quotes = 0;
+		for (int i = 0; i < line.length(); i++)
+		{
+			boolean escaped = i > 0 && line.charAt(i - 1) == ESCAPE_CHAR;
+			char parseChar = line.charAt(i);
+			
+			if (!escaped)
+				quotes += sameChar(parseChar, STRING_CHAR);
+			
+			boolean inQuote = quotes % 2 == 1;
+			boolean buildingArg = inQuote || parseChar != ',';
+			
+			if (buildingArg)
+				arg += parseChar;
+			else
+			{
+				args.add(arg.trim());
+				arg = "";
+			}
+			if (i == line.length() -1)
+				args.add(arg.trim());
+		}
+		
+		return args.toArray(new String[args.size()]);
+	}
+	public static String[] arrAccOf(String token)
+	{
+		ArrayList<String> access = new ArrayList<String>();
+		
+		String str = token.trim();
+		
+		String acc = "";
+		int quotes = 0;
+		int arraysDeep = 0;
+		for (int i = 0; i < str.length(); i++)
+		{
+			boolean escaped = i > 0 && str.charAt(i - 1) == ESCAPE_CHAR;
+			char parse = str.charAt(i);
+			
+			if (!escaped)
+			{
+				quotes += sameChar(parse, STRING_CHAR);
+				arraysDeep += sameChar(parse, ARR_S);
+				arraysDeep -= sameChar(parse, ARR_E);
+			}
+			
+			boolean inQuote = quotes % 2 == 1;
+			boolean inArray = arraysDeep > 0;
+			boolean inWord = parse != ARR_ACCESS;
+			boolean buildingAcc = inQuote || inArray || inWord;
+			
+			if (buildingAcc)
+				acc += parse;
+			else if (!acc.isEmpty())
+			{
+				access.add(acc);
+				acc = "";
+			}
+			if (i == str.length() - 1 && !acc.isEmpty())
+				access.add(acc);
+		}
+		
+		return access.toArray(new String[access.size()]);
+	}
+	public static String[] tokensOf(String line)
+	{
+		ArrayList<String> tokens = new ArrayList<String>();
+		
+		String str = line.trim();
+		
+		String tok = "";
+		int quotes = 0;
+		int arraysDeep = 0;
+		for (int i = 0; i < str.length(); i++)
+		{
+			boolean escaped = i > 0 && str.charAt(i - 1) == ESCAPE_CHAR;
+			char parseChar = str.charAt(i);
+			
+			if (!escaped)
+			{
+				quotes += sameChar(parseChar, STRING_CHAR);
+				arraysDeep += sameChar(parseChar, ARR_S);
+				arraysDeep -= sameChar(parseChar, ARR_E);
+			}
+			
+			boolean inQuote = quotes % 2 == 1;
+			boolean inArray = arraysDeep > 0;
+			boolean inWord = parseChar != ' ' && parseChar != ',' && parseChar != ARR_SEP;
+			boolean buildingToken = inQuote || inArray || inWord;
+			
+			if (buildingToken)
+				tok += parseChar;
+			else if (!tok.isEmpty())
+			{
+				tokens.add(tok);
+				tok = "";
+			}
+			if (i == str.length() - 1 && !tok.isEmpty())
+				tokens.add(tok);
+		}
+		
+		return tokens.toArray(new String[tokens.size()]);
+	}
+	private static int sameChar(char a, char b) { return a == b ? 1 : 0; }
 	public static String firstToken(String line)
 	{
 		String first = "";
@@ -371,21 +535,112 @@ public class Script
 			first += line.charAt(i);
 		return first;
 	}
+	public static String[] arrayElementsOf(String array)
+	{
+		ArrayList<String> elements = new ArrayList<String>();
+		String str = arrayTrim(array);
+		
+		String ele = "";
+		int quotes = 0;
+		int arraysDeep = 0;
+		for (int i = 0; i < str.length(); i++)
+		{
+			boolean escaped = i > 0 && str.charAt(i - 1) == ESCAPE_CHAR;
+			char parseChar = str.charAt(i);
+			
+			if (!escaped)
+			{
+				quotes += sameChar(parseChar, STRING_CHAR);
+				if (quotes % 2 != 1)
+				{
+					arraysDeep += sameChar(parseChar, ARR_S);
+					arraysDeep -= sameChar(parseChar, ARR_E);
+				}
+			}
+			
+			boolean inQuote = quotes % 2 == 1;
+			boolean inArray = arraysDeep > 0;
+			boolean inWord = parseChar != ' ' && parseChar != ',' && parseChar != ARR_SEP;
+			boolean buildingElement = inQuote || inArray || inWord;
+			
+			if (buildingElement)
+				ele += parseChar;
+			else if (!ele.isEmpty())
+			{
+				elements.add(ele);
+				ele = "";
+			}
+			if (i == str.length() - 1 && !ele.isEmpty())
+				elements.add(ele);
+		}
+		
+		return elements.toArray(new String[elements.size()]);
+	}
 	
 	///////////
+	
+	private String arrayReplace(Command cmd, int argInd, int tokInd, String array)
+	{
+		String inner = arrayTrim(array);
+		String[] innerTokens = tokensOf(inner);
+		String replaced = "" + ARR_S;
+		
+		for (int i = 0; i < innerTokens.length; i++)
+			replaced += varParse(cmd, argInd, tokInd, innerTokens[i]) + (i == innerTokens.length - 1 ? "" : ARR_SEP + " ");
+		
+		return replaced + ARR_E;
+	}
 	
 	public String varParse(Command cmd, int argInd, int tokInd, String token)
 	{
 		String trm = varTrim(token);
+		
+		boolean array = isArray(token);
+		if (CmdArg.DOUBLE.parse(trm) != null && !array)
+			return trm;
+		
 		boolean unraw = token.charAt(0) == UNRAW;
 		boolean raw = token.charAt(0) == RAW;
-		if (raw || (!unraw && (cmd.rawArg[argInd] || cmd.rawToken(tokInd))))
+		
+		if (raw || (!unraw && (cmd.rawToken(argInd, tokInd)))) // If raw, return what's written.
 			return trm;
-		String var = getVar(trm);
-		if (unraw)
+		
+		if (array)
+		{
+			String var = getVar(trm);
+			return arrayReplace(cmd, argInd, tokInd, var == null ? trm : var);
+		}
+		
+		String[] arrAcc = arrAccOf(trm);
+		if (arrAcc.length > 1)
+		{
+			if (!isArray(arrAcc[0]))
+				parseExcept("Array access attempted on non-array variable", arrAcc[0]);
+			
+			String[] elements = arrayElementsOf(varParse(cmd, argInd, tokInd, arrAcc[0]));
+			
+			if (arrAcc[1].equals(ARR_LEN))
+				return "" + elements.length;
+			
+			Integer i = CmdArg.INT.parse(varParse(cmd, argInd, tokInd, arrAcc[1]));
+			if (i == null)
+				parseExcept("Null index passed to array", arrAcc[0], arrAcc[1]);
+			try
+			{
+				String extra = "";
+				for (int j = 2; j < arrAcc.length; j++)
+					extra += ARR_ACCESS + arrAcc[j];
+				return varParse(cmd, argInd, tokInd, elements[i] + extra);
+			}
+			catch (IndexOutOfBoundsException e)
+			{
+				parseExcept("Index out of bounds", arrAcc[0], "" + i);
+			}
+		}
+		
+		String var = getVar(trm); // trm is not an array.
+		if (var != null && !raw) // If not raw, it is a request to use the contents of the variable. This may parse nested variables.
 			return varParse(cmd, argInd, tokInd, var);
-		if (var != null)
-			return arrPreFrom(token) + var + arrPostFrom(token);
 		else
 			return trm;
 	}
@@ -413,81 +668,69 @@ public class Script
 		}
 		return post;
 	}
-	private String varTrim(String str)
+	private static String varTrim(String str)
 	{
-		return str.trim().replaceFirst("" + UNRAW, "").replaceFirst("" + RAW, "");
+		return str.trim().replaceFirst(quote(UNRAW), "").replaceFirst(quote(RAW), "");
+	}
+	private static String getTrim(String str)
+	{
+		return varTrim(str).replaceAll(quote(ARR_S), "").replaceAll(quote(ARR_E), "");
+	}
+	private static String quote(String str)
+	{
+		return Pattern.quote(str);
+	}
+	private static String quote(char chr)
+	{
+		return quote("" + chr);
 	}
 	
 	public RunnableCommand parse(String line)
 	{
-		String[] tokens = line.split(" ");
-		int tks = tokens.length;
-		if (tks > 0)
+		String[] argStrs = argsOf(line);
+		if (line.length() > 0)
 		{
-			String first = tokens[0];
+			String first = firstToken(line);
 			String[] storing = first.split(STORE);
 			String name = storing[0];
 			Command cmd = CMDS.get(name);
 			if (cmd != null)
 			{
 				CmdArg<?>[] args = cmd.args;
-				Object[] objs = new Object[args.length];
-				int tok = 1;
-				String token = "";
-				for (int argInd = 0; argInd < args.length; argInd++)
-				{
-					CmdArg<?> arg = args[argInd];
-					int count = arg.tokenCount();
-					String trimmed = "";
+				boolean varArgs = cmd.isVarArgs();
+				if (argStrs.length != args.length && !(varArgs && argStrs.length >= args.length - 1))
+					parseExcept("Invalid argument count", line, name + " requires " + args.length + " args, but " + argStrs.length + " have been provided. Args are separated by commas.");
 				
-					for (int tokInArg = 0; tokInArg < count; tokInArg++)
-					{
-						if (tks <= tok)
-							parseExcept("Missing tokens", line, name + " requires " + tks + " args.");
-
-						trimmed += varParse(cmd, argInd, tok, token = tokens[tok]) + " ";
-						tok++;
-					}
-					if (count == -1)
-					{
-						if (tokens.length == tok)
-							parseExcept("Missing array tokens", line, name);
-						if (!(token = tokens[tok]).startsWith("" + ARR_S))
-							parseExcept("Argument must be an array", line, token);
-						int arrCount = 0;
-						do
-						{
-							if (token.startsWith("" + ARR_S))
-								arrCount++;
-							if (token.endsWith("" + ARR_E))
-								arrCount--;
-							String var = varParse(cmd, argInd, tok, token);
-							trimmed += var + " ";
-							tok++;
-						} while (arrCount > 0);
-					}
-					else if (count == -2)
-					{
-						if (tokens.length == tok)
-							parseExcept("Missing array tokens", line, name);
-						while (tok < tks)
-						{
-							String var = varParse(cmd, argInd, tok, token = tokens[tok]);
-							trimmed += var + " ";
-							tok++;
-						}
-					}
+				Object[] objs = new Object[args.length];
+				if (varArgs)
+					objs[objs.length - 1] = Array.newInstance(args[args.length - 1].cls, argStrs.length - args.length + 1);
+				
+				String token = "";
+				for (int argInd = 0; argInd < argStrs.length; argInd++)
+				{
+					CmdArg<?> arg = args[Math.min(argInd, args.length - 1)];
+					boolean atVA = varArgs && argInd >= args.length - 1;
 					
+					String[] tokens = tokensOf(argStrs[argInd]);
+					int count = arg.tokenCount();
+					if (tokens.length != count)
+						parseExcept("Invalid token count", line, "Argument " + (argInd + 1) + " requires " + count + " tokens, but " + tokens.length + " have been provided. Tokens are separated by spaces.");
+				
+					String trimmed = "";
+					for (int tokInArg = 0; tokInArg < count; tokInArg++)
+						trimmed += varParse(cmd, Math.min(argInd, args.length - 1), tokInArg, tokens[tokInArg]) + " ";
+				
 					trimmed = trimmed.trim();
 					Object obj = arg.parse(trimmed);
 					if (obj == null)
 						parseExcept("Invalid token resolution", trimmed, token);
-					objs[argInd] = obj;
+					
+					if (!atVA)
+						objs[argInd] = obj;
+					else
+						((Object[]) objs[objs.length - 1])[argInd - args.length + 1] = obj;
 				}
 
-				if (tok != tks && !tokens[tok].startsWith(COMMENT))
-					parseExcept("Unused token", tokens[tok], token);
-				
 				RunnableCommand run = new RunnableCommand(cmd, objs);
 				return run;
 			}
@@ -510,7 +753,7 @@ public class Script
 	public void parseExcept(String preAt, String postLine, String extra)
 	{
 		throw new CommandParseException(preAt + " at line " + (parseLine + 1) + ": " + postLine + ", from: " + lines[parseLine]
-				+ (extra == null ? "" : ", extra info: " + extra));
+				+ (extra == null ? "." : ", extra info: " + extra));
 	}
 	
 	////////////////////////////////////////////////
@@ -531,8 +774,7 @@ public class Script
 			String line = scan.nextLine();
 			if (line.startsWith(LABEL))
 			{
-				String[] tokens = tokensOf(line);
-				putLabel(tokens[0], num);
+				putLabel(firstToken(line), num);
 			}
 			
 			str += line + "\n";
@@ -565,18 +807,27 @@ public class Script
 			this.exceptionCallback.accept(e);
 		}
 	}
-	public void runFrom(int start)
+	public void subRunFrom(int start)
+	{
+		runFrom(start, false);
+	}
+	private void runFrom(int start)
+	{
+		runFrom(start, true);
+	}
+	private void runFrom(int start, boolean returns)
 	{
 		if (start != -1)
-			pushStack(start);
+			pushStack(start, returns);
 		else
-			parseLine = 0;
+			pushStack(0, returns);
 		if (keyIn == null)
 			keyIn = new Scanner(System.in);
-		while(parseLine < lines.length && parseLine != -1)
+		
+		while(parseLine < lines.length && !stack.isEmpty())
 		{
 			String line = lines[parseLine];
-			System.out.print("Parsing: " + line);
+		//	System.out.print("Parsing: " + line);
 			if (line.startsWith(COMMENT) || line.isEmpty() || line.startsWith(LABEL))
 			{
 				parseLine++;
@@ -586,14 +837,14 @@ public class Script
 			String[] storing = first.split(STORE);
 			RunnableCommand cmd = parse(line);
 			String out;
-			System.out.println(" ... Done");
+	//		System.out.println(" ... Done");
 			putVar(PREVIOUS, out = cmd.run(this));
 			for (int i = 1; i < storing.length; i++)
 				putVar(storing[i], out);
-			if (parseLine != -1)
-				parseLine++;
+			if (!popped.isEmpty() && !popped.pop().returns)
+				break;
+			parseLine++;
 		}
-		parseLine = -1;
 	}
 	public void goTo(String label)
 	{
@@ -601,7 +852,7 @@ public class Script
 		if (line == NO_LABEL)
 			parseExcept("Invalid label specification", label, "No label found.");
 		
-		pushStack(line);
+		pushStack(line, true);
 	}
 	
 	public boolean putVarType(String name, String val, CmdArg<?> type, String prompt)
@@ -620,6 +871,8 @@ public class Script
 	
 	public void putVar(String name, String val)
 	{
+		if (name.contains("" + ARR_S) || name.contains("" + ARR_E) || name.contains("" + STRING_CHAR) || name.contains("" + ESCAPE_CHAR))
+			parseExcept("Illegal characters in variable name", name);
 		try
 		{
 			Double.parseDouble(name);
@@ -630,9 +883,17 @@ public class Script
 		vars.put(name, val);
 	}
 	
+	public void integrateVarsFrom(Script other)
+	{
+		other.vars.forEach((var, val) ->
+		{
+			vars.put(var, val);
+		});
+	}
+	
 	public String getVar(String name)
 	{
-		return vars.get(arrayTrim(name));
+		return vars.get(getTrim(name));
 	}
 	public String prev()
 	{
@@ -640,43 +901,54 @@ public class Script
 	}
 	public static String arrayTrim(String token)
 	{
-		String str = token;
+		String str = token.trim();
 		if (str.startsWith("" + ARR_S))
 			str = str.substring(1);
 		if (str.endsWith("" + ARR_E))
 			str = str.substring(0, str.length() - 1);
 		return str;
 	}
+	public static String stringTrim(String string)
+	{
+		String str = string.trim();
+		if (str.startsWith("" + STRING_CHAR) && str.endsWith("" + STRING_CHAR))
+			return str.substring(1, str.length() - 1);
+		else
+			return str;
+	}
 	
 	public void putLabel(String label, int line)
 	{
-		labels.put(label.replaceFirst(LABEL, ""), line);
+		labels.put(label.replaceFirst(quote(LABEL), ""), line);
 	}
 	public int getLabelLine(String label)
 	{
-		Integer line = labels.get(label.replaceFirst(LABEL, ""));
+		Integer line = labels.get(label.replaceFirst(quote(LABEL), ""));
 		if (line == null)
 			return NO_LABEL;
 		return line;
 	}
 	
-	private void pushStack(int to)
+	private void pushStack(int to, boolean returns)
 	{
-		stack.push(parseLine);
+		stack.push(new StackEntry(parseLine, to, returns));
 		parseLine = to;
 	}
 	
-	private int popStack()
+	private void popStack()
 	{
-		if (stack.isEmpty())
-		{
-			return parseLine = -1;
-		}
-		parseLine = stack.pop();
-		return parseLine;
+		StackEntry ent = stack.pop();
+		popped.push(ent);
+		parseLine = ent.from;
+		return;
 	}
 	
 	///////////////////////
+	
+	public void setPrintCallback(Consumer<String> callback)
+	{
+		this.printCallback = callback;
+	}
 	
 	public void setErrorCallback(Consumer<String> callback)
 	{
@@ -696,6 +968,39 @@ public class Script
 	public void setUserReqestType(UserReqType reqType)
 	{
 		this.userRequestType = reqType;
+	}
+	
+	public Consumer<String> getPrintCallback()
+	{
+		return printCallback;
+	}
+	
+	public Consumer<String> getErrorCallback()
+	{
+		return errorCallback;
+	}
+	
+	public Consumer<Exception> getExceptionCallback()
+	{
+		return exceptionCallback;
+	}
+	
+	public BiConsumer<CommandParseException, String> getParseExceptionCallback()
+	{
+		return parseExceptionCallback;
+	}
+	
+	public UserReqType getUserReqType()
+	{
+		return userRequestType;
+	}
+	
+	public void transferCallbacks(Script to)
+	{
+		to.setPrintCallback(getPrintCallback());
+		to.setErrorCallback(getErrorCallback());
+		to.setExceptionCallback(getExceptionCallback());
+		to.setParseExceptionCallback(getParseExceptionCallback());
 	}
 	
 	//////////////////////

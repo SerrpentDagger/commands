@@ -8,9 +8,13 @@ import commands.BooleanExp.Comp;
 public abstract class CmdArg<T>
 {
 	public final String type;
-	public CmdArg(String type)
+	public final Class<T> cls;
+	public CmdArg(String type, Class<T> cls)
 	{
 		this.type = type;
+		this.cls = cls;
+		if (tokenCount() < 0)
+			throw new IllegalStateException("Only positive token counts can be parsed.");
 	}
 	
 	public boolean rawToken(int ind) { return false; }
@@ -47,7 +51,7 @@ public abstract class CmdArg<T>
 	
 	///////////////////////
 	
-	public static final CmdArg<Command> COMMAND = new CmdArg<Command>("Command")
+	public static final CmdArg<Command> COMMAND = new CmdArg<Command>("Command", Command.class)
 	{
 		@Override
 		public Command parse(String trimmed)
@@ -56,7 +60,7 @@ public abstract class CmdArg<T>
 		}
 	};
 	
-	public static final CmdArg<Color> COLOR = new CmdArg<Color>("Color")
+	public static final CmdArg<Color> COLOR = new CmdArg<Color>("Color", Color.class)
 	{
 		@Override
 		public int tokenCount()
@@ -78,7 +82,7 @@ public abstract class CmdArg<T>
 		}
 	};
 	
-	public static final CmdArg<Integer> INT = new CmdArg<Integer>("Integer")
+	public static final CmdArg<Integer> INT = new CmdArg<Integer>("Integer", Integer.class)
 	{
 		@Override
 		public Integer parse(String trimmed)
@@ -93,7 +97,7 @@ public abstract class CmdArg<T>
 		}
 	};
 	
-	public static final CmdArg<Double> DOUBLE = new CmdArg<Double>("Double")
+	public static final CmdArg<Double> DOUBLE = new CmdArg<Double>("Double", Double.class)
 	{	
 		@Override
 		public Double parse(String trimmed)
@@ -108,7 +112,7 @@ public abstract class CmdArg<T>
 		}
 	};
 	
-	public static final CmdArg<String> TOKEN = new CmdArg<String>("Token")
+	public static final CmdArg<String> TOKEN = new CmdArg<String>("Token", String.class)
 	{
 		@Override
 		public String parse(String trimmed)
@@ -117,10 +121,16 @@ public abstract class CmdArg<T>
 		}
 	};
 	
-	public static final CmdArg<String[]> STRING = arrayOf(TOKEN);
-	public static final CmdArg<String[]> STRING_GREEDY = greedyArray(TOKEN);
+	public static final CmdArg<CmdString> STRING = new CmdArg<CmdString>("String", CmdString.class)
+	{
+		@Override
+		public CmdString parse(String trimmed)
+		{
+			return new CmdString(trimmed);
+		}
+	};
 	
-	public static final CmdArg<Boolean> BOOLEAN = new CmdArg<Boolean>("Boolean")
+	public static final CmdArg<Boolean> BOOLEAN = new CmdArg<Boolean>("Boolean", Boolean.class)
 	{
 		@Override
 		public Boolean parse(String trimmed)
@@ -137,7 +147,7 @@ public abstract class CmdArg<T>
 		}
 	};
 	
-	public static final CmdArg<BooleanThen> BOOLEAN_THEN = new CmdArg<BooleanThen>("Boolean Then")
+	public static final CmdArg<BooleanThen> BOOLEAN_THEN = new CmdArg<BooleanThen>("Boolean Then", BooleanThen.class)
 	{
 		@Override
 		public int tokenCount()
@@ -154,7 +164,7 @@ public abstract class CmdArg<T>
 		}
 	};
 	
-	public static final CmdArg<BooleanExp> BOOLEAN_EXP = new CmdArg<BooleanExp>("Double Comparator Double")
+	public static final CmdArg<BooleanExp> BOOLEAN_EXP = new CmdArg<BooleanExp>("Double Comparator Double", BooleanExp.class)
 	{
 		@Override
 		public int tokenCount()
@@ -181,7 +191,7 @@ public abstract class CmdArg<T>
 		}
 	};
 	
-	public static final CmdArg<VarSet> VAR_SET = new CmdArg<VarSet>("VarName Token...")
+	public static final CmdArg<VarSet> VAR_SET = new CmdArg<VarSet>("VarName Token", VarSet.class)
 	{
 		@Override
 		public boolean rawToken(int ind)
@@ -192,16 +202,17 @@ public abstract class CmdArg<T>
 		@Override
 		public int tokenCount()
 		{
-			return -2;
+			return 2;
 		}
 		
 		@Override
 		public VarSet parse(String trimmed)
 		{
-			String v, s;
+			String v;
+			CmdString s;
 			String[] tokens = Script.tokensOf(trimmed);
 			v = TOKEN.parse(tokens, 0);
-			s = arrayTokenTo(STRING_GREEDY.parse(tokens, 1));
+			s = STRING.parse(tokens, 1);
 			if (v == null || s == null)
 				return null;
 			return new VarSet(v, s);
@@ -210,7 +221,7 @@ public abstract class CmdArg<T>
 	
 	////////////////////////////////////////
 	
-	public static <X> CmdArg<X[]> greedyArray(CmdArg<X> arg)
+/*	public static <X> CmdArg<X[]> greedyArray(CmdArg<X> arg)
 	{
 		CmdArg<X[]> array = arrayOf(arg);
 		CmdArg<X[]> greedy = new CmdArg<X[]>(arg.type + "...")
@@ -229,18 +240,13 @@ public abstract class CmdArg<T>
 		};
 		
 		return greedy;
-	}
+	}*/
 	
 	public static <X> CmdArg<X[]> arrayOf(CmdArg<X> arg)
 	{
-		CmdArg<X[]> array = new CmdArg<X[]>(Script.ARR_S + arg.type + Script.ARR_E)
+		@SuppressWarnings("unchecked")
+		CmdArg<X[]> array = new CmdArg<X[]>(Script.ARR_S + arg.type + Script.ARR_E, (Class<X[]>) Array.newInstance(arg.cls, 0).getClass())
 		{
-			@Override
-			public int tokenCount()
-			{
-				return -1;
-			}
-			
 			@Override
 			public X[] parse(String trimmed)
 			{
@@ -280,15 +286,5 @@ public abstract class CmdArg<T>
 		};
 		
 		return array;
-	}
-	
-	public static String arrayTokenTo(String[] tokenString)
-	{
-		String str = "";
-		for (int i = 0; i < tokenString.length; i++)
-		{
-			str += tokenString[i] + (i == tokenString.length - 1 ? "" : " ");
-		}
-		return Script.arrayTrim(str);
 	}
 }
