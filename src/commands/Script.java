@@ -47,7 +47,7 @@ public class Script
 	public String path;
 	public final String[] lines;
 	private Scanner keyIn;
-	private final Robot rob;
+	public final Robot rob;
 	private Consumer<String> printCallback = (str) -> System.out.println(str);
 	private Consumer<String> errorCallback = (err) -> System.err.println(err);
 	private BiConsumer<CommandParseException, String> parseExceptionCallback = (exc, err) -> { exc.printStackTrace(); };
@@ -276,6 +276,9 @@ public class Script
 	public static final Command GOTO = add("goto", CmdArg.TOKEN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
 	{
 		String label = (String) objs[0];
+		if (label.equals(NULL))
+			return "" + ctx.parseLine;
+		
 		int line = ctx.getLabelLine(label);
 		if (line == NO_LABEL)
 			ctx.parseExcept("Invalid label specification", label, "No label found.");
@@ -330,6 +333,12 @@ public class Script
 		ctx.rob.delay((int) objs[1]);
 		ctx.rob.keyRelease(key);
 	}, CmdArg.TOKEN, CmdArg.DOUBLE);
+	
+	public static final Command AUTO_DELAY = add("set_robot_delay", CmdArg.INT).setFunc((ctx, objs) ->
+	{
+		ctx.rob.setAutoDelay((int) objs[0]);
+		return "" + ctx.rob.getAutoDelay();
+	});
 	
 	private static Command keyCommand(String name, KeyFunc k, CmdArg<?>... args)
 	{
@@ -766,6 +775,7 @@ public class Script
 	public Script(Scanner scan) throws AWTException
 	{
 		rob = new Robot();
+		rob.setAutoDelay(100);
 		path = null;
 		String str = "";
 		int num = 0;
