@@ -97,6 +97,18 @@ public abstract class CmdArg<T>
 		}
 	};
 	
+	public static final CmdArg<Double> DOUBLE_POSITIVE = new CmdArg<Double>("PositiveDouble", Double.class)
+	{
+		@Override
+		public Double parse(String trimmed)
+		{
+			Double doub = DOUBLE.parse(trimmed);
+			if (doub != null && doub >= 0)
+				return doub;
+			return null;
+		}
+	};
+	
 	public static final CmdArg<Double> DOUBLE = new CmdArg<Double>("Double", Double.class)
 	{	
 		@Override
@@ -191,7 +203,7 @@ public abstract class CmdArg<T>
 		}
 	};
 	
-	public static final CmdArg<VarSet> VAR_SET = new CmdArg<VarSet>("VarName Token", VarSet.class)
+	public static final CmdArg<VarSet> VAR_SET = new CmdArg<VarSet>("VarName Value", VarSet.class)
 	{
 		@Override
 		public boolean rawToken(int ind)

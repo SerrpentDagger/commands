@@ -14,6 +14,7 @@ import java.util.LinkedHashMap;
 import java.util.Map.Entry;
 import java.util.Scanner;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -48,7 +49,9 @@ public class Script
 	public final String[] lines;
 	private Scanner keyIn;
 	public final Robot rob;
+	private AtomicBoolean forceKill = new AtomicBoolean(false);
 	private Consumer<String> printCallback = (str) -> System.out.println(str);
+	private BiConsumer<String, String> prevCallback = (cmd, prv) -> {};
 	private Consumer<String> errorCallback = (err) -> System.err.println(err);
 	private BiConsumer<CommandParseException, String> parseExceptionCallback = (exc, err) -> { exc.printStackTrace(); };
 	private Consumer<Exception> exceptionCallback = (exc) ->
@@ -166,6 +169,14 @@ public class Script
 		ctx.printCallback.accept(str.unraw);
 		return str.raw;
 	});
+	public static final Command PRINT_VARS = add("print_all_vars").setFunc((ctx, objs) ->
+	{
+		ctx.vars.forEach((var, val) ->
+		{
+			ctx.printCallback.accept(var + "=" + val);
+		});
+		return ctx.prev();
+	});
 	public static final Command KEY_IN = add("key_in", CmdArg.TOKEN).setFunc((ctx, objs) ->
 	{
 		String[] vars = (String[]) objs[0];
@@ -233,6 +244,22 @@ public class Script
 	{
 		return "" + (!(boolean) objs[0]);
 	});
+	public static final Command OR = add("or", CmdArg.BOOLEAN).setFunc((ctx, objs) ->
+	{
+		Boolean[] ors = (Boolean[]) objs[0];
+		boolean out = false;
+		for (boolean b : ors)
+			out = out || b;
+		return "" + out;
+	}).setVarArgs();
+	public static final Command AND = add("and", CmdArg.BOOLEAN).setFunc((ctx, objs) ->
+	{
+		Boolean[] ands = (Boolean[]) objs[0];
+		boolean out = true;
+		for (boolean b : ands)
+			out = out && b;
+		return "" + out;
+	}).setVarArgs();
 	public static final Command COMPARE = add("compare", CmdArg.BOOLEAN_EXP).setFunc((ctx, objs) ->
 	{
 		return "" + ((BooleanExp) objs[0]).eval();
@@ -332,7 +359,7 @@ public class Script
 		ctx.rob.keyPress(key);
 		ctx.rob.delay((int) objs[1]);
 		ctx.rob.keyRelease(key);
-	}, CmdArg.TOKEN, CmdArg.DOUBLE);
+	}, CmdArg.TOKEN, CmdArg.INT);
 	
 	public static final Command AUTO_DELAY = add("set_robot_delay", CmdArg.INT).setFunc((ctx, objs) ->
 	{
@@ -707,6 +734,7 @@ public class Script
 			{
 				CmdArg<?>[] args = cmd.args;
 				boolean varArgs = cmd.isVarArgs();
+				boolean varArgArray = false;
 				if (argStrs.length != args.length && !(varArgs && argStrs.length >= args.length - 1))
 					parseExcept("Invalid argument count", line, name + " requires " + args.length + " args, but " + argStrs.length + " have been provided. Args are separated by commas.");
 				
@@ -714,30 +742,49 @@ public class Script
 				if (varArgs)
 					objs[objs.length - 1] = Array.newInstance(args[args.length - 1].cls, argStrs.length - args.length + 1);
 				
-				String token = "";
 				for (int argInd = 0; argInd < argStrs.length; argInd++)
 				{
 					CmdArg<?> arg = args[Math.min(argInd, args.length - 1)];
 					boolean atVA = varArgs && argInd >= args.length - 1;
+					boolean firstVarArg = varArgs && argInd == args.length - 1;
 					
 					String[] tokens = tokensOf(argStrs[argInd]);
-					int count = arg.tokenCount();
-					if (tokens.length != count)
-						parseExcept("Invalid token count", line, "Argument " + (argInd + 1) + " requires " + count + " tokens, but " + tokens.length + " have been provided. Tokens are separated by spaces.");
-				
-					String trimmed = "";
-					for (int tokInArg = 0; tokInArg < count; tokInArg++)
-						trimmed += varParse(cmd, Math.min(argInd, args.length - 1), tokInArg, tokens[tokInArg]) + " ";
-				
-					trimmed = trimmed.trim();
-					Object obj = arg.parse(trimmed);
-					if (obj == null)
-						parseExcept("Invalid token resolution", trimmed, token);
 					
-					if (!atVA)
-						objs[argInd] = obj;
+					varArgArray = varArgArray || (firstVarArg && tokens.length == 1 && isArray(varTrim(tokens[0])));
+					if (varArgArray && !firstVarArg)
+						parseExcept("Invalid argument count", line, "If var-arg arguments are specified as an array, the array must be the last argument");
+					
+					String trimmed = "";
+					Object obj;
+					if (!varArgArray)
+					{
+						int count = arg.tokenCount();
+						if (tokens.length != count)
+							parseExcept("Invalid token count", line, "Argument " + (argInd + 1) + " requires " + count + " tokens, but " + tokens.length + " have been provided. Tokens are separated by spaces.");
+					
+						for (int tokInArg = 0; tokInArg < count; tokInArg++)
+							trimmed += varParse(cmd, Math.min(argInd, args.length - 1), tokInArg, tokens[tokInArg]) + " ";
+						
+						trimmed = trimmed.trim();
+						obj = arg.parse(trimmed);
+						if (obj == null)
+							parseExcept("Invalid token resolution", trimmed);
+						
+						if (!atVA)
+							objs[argInd] = obj;
+						else
+							((Object[]) objs[objs.length - 1])[argInd - args.length + 1] = obj;
+					}
 					else
-						((Object[]) objs[objs.length - 1])[argInd - args.length + 1] = obj;
+					{
+						trimmed = varParse(cmd, args.length - 1, 0, tokens[0]);
+						obj = CmdArg.arrayOf(arg).parse(trimmed);
+						if (obj == null)
+							parseExcept("Invalid var-arg array resolution", trimmed, tokens[0]);
+						
+						objs[objs.length - 1] = obj;
+					}
+				
 				}
 
 				RunnableCommand run = new RunnableCommand(cmd, objs);
@@ -775,7 +822,7 @@ public class Script
 	public Script(Scanner scan) throws AWTException
 	{
 		rob = new Robot();
-		rob.setAutoDelay(100);
+		rob.setAutoDelay(300);
 		path = null;
 		String str = "";
 		int num = 0;
@@ -800,6 +847,14 @@ public class Script
 		this.path = script.getAbsolutePath();
 	}
 	
+	public synchronized void setForceKill(AtomicBoolean bool)
+	{
+		forceKill = bool;
+	}
+	public synchronized void forceKill()
+	{
+		forceKill.set(true);
+	}
 	public void run()
 	{
 		try
@@ -834,7 +889,7 @@ public class Script
 		if (keyIn == null)
 			keyIn = new Scanner(System.in);
 		
-		while(parseLine < lines.length && !stack.isEmpty())
+		while(parseLine < lines.length && !stack.isEmpty() && !forceKill.get())
 		{
 			String line = lines[parseLine];
 		//	System.out.print("Parsing: " + line);
@@ -851,6 +906,7 @@ public class Script
 			putVar(PREVIOUS, out = cmd.run(this));
 			for (int i = 1; i < storing.length; i++)
 				putVar(storing[i], out);
+			prevCallback.accept(storing[0], out);
 			if (!popped.isEmpty() && !popped.pop().returns)
 				break;
 			parseLine++;
@@ -960,6 +1016,11 @@ public class Script
 		this.printCallback = callback;
 	}
 	
+	public void setPrevCallback(BiConsumer<String, String> callback)
+	{
+		this.prevCallback = callback;
+	}
+	
 	public void setErrorCallback(Consumer<String> callback)
 	{
 		this.errorCallback = callback;
@@ -983,6 +1044,11 @@ public class Script
 	public Consumer<String> getPrintCallback()
 	{
 		return printCallback;
+	}
+	
+	public BiConsumer<String, String> getPrevCallback()
+	{
+		return prevCallback;
 	}
 	
 	public Consumer<String> getErrorCallback()
