@@ -5,13 +5,17 @@ public class Command
 	private boolean isVarArgs = false;
 	boolean[] rawArg;
 	String name;
+	String ret;
+	String desc;
 	CmdArg<?>[] args;
 	CmdFunc func;
 	
-	protected Command(String name, CmdArg<?>... args)
+	protected Command(String name, String ret, String desc, CmdArg<?>... args)
 	{
 		this.name = name;
 		this.args = args;
+		this.ret = ret;
+		this.desc = desc;
 		rawArg = new boolean[args.length];
 	}
 	
@@ -59,17 +63,24 @@ public class Command
 	public static class RunnableCommand
 	{
 		private final Object[] objs;
+		private final String inputArgs;
 		private final Command cmd;
 		
-		public RunnableCommand(Command cmd, Object... args)
+		public RunnableCommand(Command cmd, String input, Object... args)
 		{
 			this.cmd = cmd;
 			objs = args;
+			inputArgs = input;
 		}
 		
 		public String run(Script ctx)
 		{
 			return cmd.func.cmd(ctx, objs);
+		}
+		
+		public String getInput()
+		{
+			return inputArgs;
 		}
 	}
 	

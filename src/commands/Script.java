@@ -40,6 +40,8 @@ public class Script
 	public static final int NO_LABEL = -2;
 	public static final char UNRAW = '%', RAW = '$';
 	
+	public static final String BOOL = "boolean", VOID = "void", TOKEN = "Token", STRING = "String", INT = "int", DOUBLE = "double", VALUE = "Value";
+	
 	public int parseLine = -1;
 	private final HashMap<String, String> vars = new HashMap<String, String>();
 	private final HashMap<String, Integer> labels = new HashMap<String, Integer>();
@@ -52,12 +54,12 @@ public class Script
 	private AtomicBoolean forceKill = new AtomicBoolean(false);
 	private Consumer<String> printCallback = (str) -> System.out.println(str);
 	private BiConsumer<String, String> prevCallback = (cmd, prv) -> {};
-	private Consumer<String> errorCallback = (err) -> System.err.println(err);
+	private Consumer<String> errorCallback = (err) -> printCallback.accept(err);
 	private BiConsumer<CommandParseException, String> parseExceptionCallback = (exc, err) -> { exc.printStackTrace(); };
+	private Debugger debugger = (cmd, args, ret) -> {};
 	private Consumer<Exception> exceptionCallback = (exc) ->
 	{
-		System.err.println("Exception encountered at line: " + (parseLine + 1));
-		exc.printStackTrace();
+		errorCallback.accept("Exception encountered at line: " + (parseLine + 1) + "\n" + exc.toString());
 	};
 	private Consumer<String[]> userRequest = (vars) ->
 	{
@@ -80,9 +82,9 @@ public class Script
 		return CMDS.get(name);
 	}
 	
-	public static Command add(String name, CmdArg<?>... args)
+	public static Command add(String name, String ret, String desc, CmdArg<?>... args)
 	{
-		Command cmd = new Command(name, args);
+		Command cmd = new Command(name, ret, desc, args);
 		if (CMDS.put(name, cmd) != null)
 			throw new IllegalArgumentException("Cannot register two commands to the same name.");
 		return cmd;
@@ -126,15 +128,14 @@ public class Script
 	
 	/////////////////////////////////////////////
 	
-	public static final Command VAR = add("var", CmdArg.VAR_SET).setFunc((ctx, objs) ->
+	public static final Command VAR = add("var", VOID, "Sets a variable to a value.", CmdArg.VAR_SET).setFunc((ctx, objs) ->
 	{
 		VarSet[] vars = (VarSet[]) objs[0];
-		String out = vars[0].set.raw;
 		for (VarSet var : vars)
 			ctx.putVar(var.var, var.set.raw);
-		return out;
+		return ctx.prev();
 	}).setVarArgs();
-	public static final Command IS_VAR = add("is_var", CmdArg.TOKEN).setFunc((ctx, objs) ->
+	public static final Command IS_VAR = add("is_var", BOOL, "Checks whether or not the token is a variable.", CmdArg.TOKEN).setFunc((ctx, objs) ->
 	{
 		String[] vars = (String[]) objs[0];
 		for (String var : vars)
@@ -142,7 +143,7 @@ public class Script
 				return FALSE;
 		return TRUE;
 	}).setVarArgs();
-	public static final Command IS_NUMBER = add("is_number", CmdArg.TOKEN).setFunc((ctx, objs) ->
+	public static final Command IS_NUMBER = add("is_number", BOOL, "Checks whether or not the token is a number.", CmdArg.TOKEN).setFunc((ctx, objs) ->
 	{
 		String[] vars = (String[]) objs[0];
 		for (String var : vars)
@@ -153,7 +154,7 @@ public class Script
 		}
 		return TRUE;
 	}).setVarArgs();
-	public static final Command IS_ARRAY = add("is_array", CmdArg.TOKEN).setFunc((ctx, objs) ->
+	public static final Command IS_ARRAY = add("is_array", BOOL, "Checks whether or not the token is an array.", CmdArg.TOKEN).setFunc((ctx, objs) ->
 	{
 		String[] vars = (String[]) objs[0];
 		for (String var : vars)
@@ -163,13 +164,13 @@ public class Script
 		}
 		return TRUE;
 	}).setVarArgs();
-	public static final Command PRINT = add("print", CmdArg.STRING).setFunc((ctx, objs) ->
+	public static final Command PRINT = add("print", STRING, "Prints and returns the supplied value.", CmdArg.STRING).setFunc((ctx, objs) ->
 	{
 		CmdString str = (CmdString) objs[0];
 		ctx.printCallback.accept(str.unraw);
 		return str.raw;
 	});
-	public static final Command PRINT_VARS = add("print_all_vars").setFunc((ctx, objs) ->
+	public static final Command PRINT_VARS = add("print_all_vars", VOID, "Prints all variables and their values.").setFunc((ctx, objs) ->
 	{
 		ctx.vars.forEach((var, val) ->
 		{
@@ -177,7 +178,7 @@ public class Script
 		});
 		return ctx.prev();
 	});
-	public static final Command KEY_IN = add("key_in", CmdArg.TOKEN).setFunc((ctx, objs) ->
+	public static final Command KEY_IN = add("key_in", VALUE, "Fills the variables with user-keyboard-input.", CmdArg.TOKEN).setFunc((ctx, objs) ->
 	{
 		String[] vars = (String[]) objs[0];
 		String next = NULL;
@@ -189,7 +190,7 @@ public class Script
 		}
 		return next;
 	}).rawArg(0).setVarArgs();
-	public static final Command USER_REQ = add("user_req", CmdArg.TOKEN).setFunc((ctx, objs) ->
+	public static final Command USER_REQ = add("user_req", VOID, "Requests values from the user as set by the Commands library implementor.", CmdArg.TOKEN).setFunc((ctx, objs) ->
 	{
 		ctx.userRequest.accept((String[]) objs[0]);
 		return ctx.prev();
@@ -201,7 +202,7 @@ public class Script
 	public static final Command USER_REQ_BOOL = userReqType("user_req_bool", CmdArg.BOOLEAN, "boolean");
 	public static final Command USER_REQ_TOKEN = userReqType("user_req_token", CmdArg.TOKEN, "token");
 	
-	public static final Command CONCAT = add("concat", CmdArg.STRING).setFunc((ctx, objs) ->
+	public static final Command CONCAT = add("concat", STRING, "Concatinates and returns the argument Strings.", CmdArg.STRING).setFunc((ctx, objs) ->
 	{
 		String out = "\"";
 		for (CmdString tokArr : (CmdString[]) objs[0])
@@ -210,41 +211,41 @@ public class Script
 		}
 		return out + "\"";
 	}).setVarArgs();
-	public static final Command ADD = add("add", CmdArg.DOUBLE).setFunc((ctx, objs) ->
+	public static final Command ADD = add("add", DOUBLE, "Adds and returns the argument numbers.", CmdArg.DOUBLE).setFunc((ctx, objs) ->
 	{
 		return "" + operate(0, (Object[]) objs[0], (all, next) -> all + next);
 	}).setVarArgs();
-	public static final Command SUB = add("sub", CmdArg.DOUBLE).setFunc((ctx, objs) ->
+	public static final Command SUB = add("sub", DOUBLE, "Subtracts and returns the argument numbers.", CmdArg.DOUBLE).setFunc((ctx, objs) ->
 	{
 		Object[] arr = (Object[]) objs[0];
 		return "" + operate((double) arr[0] * 2, arr, (all, next) -> all - next);
 	}).setVarArgs();
-	public static final Command MULT = add("mult", CmdArg.DOUBLE).setFunc((ctx, objs) ->
+	public static final Command MULT = add("mult", DOUBLE, "Multiplies and returns the argument numbers.", CmdArg.DOUBLE).setFunc((ctx, objs) ->
 	{
 		return "" + operate(1, (Object[]) objs[0], (all, next) -> all * next);
 	}).setVarArgs();
-	public static final Command DIVI = add("divi", CmdArg.DOUBLE).setFunc((ctx, objs) ->
+	public static final Command DIVI = add("divi", DOUBLE, "Divides and returns the argument numbers.", CmdArg.DOUBLE).setFunc((ctx, objs) ->
 	{
 		Object[] arr = (Object[]) objs[0];
 		return "" + operate((double) arr[0] * (double) arr[0], arr, (all, next) -> all / next);
 	}).setVarArgs();
-	public static final Command INCREMENT = add("inc", CmdArg.DOUBLE).setFunc((ctx, objs) ->
+	public static final Command INCREMENT = add("inc", DOUBLE, "Returns the increment of the argument number.", CmdArg.DOUBLE).setFunc((ctx, objs) ->
 	{
 		return "" + ((double) objs[0] + 1);
 	});
-	public static final Command DECREMENT = add("dec", CmdArg.DOUBLE).setFunc((ctx, objs) ->
+	public static final Command DECREMENT = add("dec", DOUBLE, "Returns the decriment of the argument number.", CmdArg.DOUBLE).setFunc((ctx, objs) ->
 	{
 		return "" + ((double) objs[0] - 1);
 	});
-	public static final Command NEGATE = add("negate", CmdArg.DOUBLE).setFunc((ctx, objs) ->
+	public static final Command NEGATE = add("negate", DOUBLE, "Returns the negation of the argument number.", CmdArg.DOUBLE).setFunc((ctx, objs) ->
 	{
 		return "" + (-(double) objs[0]);
 	});
-	public static final Command NOT = add("not", CmdArg.BOOLEAN).setFunc((ctx, objs) ->
+	public static final Command NOT = add("not", BOOL, "Return the boolean inverse of the argument.", CmdArg.BOOLEAN).setFunc((ctx, objs) ->
 	{
 		return "" + (!(boolean) objs[0]);
 	});
-	public static final Command OR = add("or", CmdArg.BOOLEAN).setFunc((ctx, objs) ->
+	public static final Command OR = add("or", BOOL, "Return true if any argument is true.", CmdArg.BOOLEAN).setFunc((ctx, objs) ->
 	{
 		Boolean[] ors = (Boolean[]) objs[0];
 		boolean out = false;
@@ -252,7 +253,7 @@ public class Script
 			out = out || b;
 		return "" + out;
 	}).setVarArgs();
-	public static final Command AND = add("and", CmdArg.BOOLEAN).setFunc((ctx, objs) ->
+	public static final Command AND = add("and", BOOL, "Return true if every argument is true.", CmdArg.BOOLEAN).setFunc((ctx, objs) ->
 	{
 		Boolean[] ands = (Boolean[]) objs[0];
 		boolean out = true;
@@ -260,11 +261,19 @@ public class Script
 			out = out && b;
 		return "" + out;
 	}).setVarArgs();
-	public static final Command COMPARE = add("compare", CmdArg.BOOLEAN_EXP).setFunc((ctx, objs) ->
+	public static final Command COMPARE = add("compare", BOOL, "Returns the evaluation of the boolean expression.", CmdArg.BOOLEAN_EXP).setFunc((ctx, objs) ->
 	{
 		return "" + ((BooleanExp) objs[0]).eval();
 	});
-	public static final Command IF_THEN_ELSE = add("if", CmdArg.BOOLEAN_THEN).setFunc((ctx, objs) ->
+	public static final Command STRING_MATCH = add("string_match", BOOL, "Returns true if the Strings match.", CmdArg.STRING).setFunc((ctx, objs) ->
+	{
+		CmdString[] strs = (CmdString[]) objs[0];
+		boolean equal = true;
+		for (int i = 1; i < strs.length; i++)
+			equal = equal && strs[i].unraw.equals(strs[0].unraw);
+		return "" + equal;
+	}).setVarArgs();
+	public static final Command IF_THEN_ELSE = add("if", TOKEN, "Iterates through the arguments, and returns the first token that has a true boolean, or null.", CmdArg.BOOLEAN_THEN).setFunc((ctx, objs) ->
 	{
 		BooleanThen[] ba = (BooleanThen[]) objs[0];
 		for (BooleanThen b : ba)
@@ -272,7 +281,7 @@ public class Script
 				return b.then;
 		return NULL;
 	}).setVarArgs();
-	public static final Command FOR = add("for", CmdArg.INT, CmdArg.TOKEN).setFunc((ctx, objs) ->
+	public static final Command FOR = add("for", VOID, "Excecutes the given token label the given number of times.", CmdArg.INT, CmdArg.TOKEN).setFunc((ctx, objs) ->
 	{
 		int count = (int) objs[0];
 		String label = (String) objs[1];
@@ -286,7 +295,7 @@ public class Script
 		}
 		return ctx.prev();
 	});
-	public static final Command WHILE = add("while", CmdArg.BOOLEAN, CmdArg.TOKEN).setFunc((ctx, objs) ->
+	public static final Command WHILE = add("while", VOID, "While the boolean is true, excecutes the token label.", CmdArg.BOOLEAN, CmdArg.TOKEN).setFunc((ctx, objs) ->
 	{
 		boolean bool = (boolean) objs[0];
 		int wL = ctx.parseLine;
@@ -300,7 +309,7 @@ public class Script
 		}
 		return ctx.prev();
 	});
-	public static final Command GOTO = add("goto", CmdArg.TOKEN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
+	public static final Command GOTO = add("goto", INT, "Excecutes the given token label, and returns the line number of that label.", CmdArg.TOKEN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
 	{
 		String label = (String) objs[0];
 		if (label.equals(NULL))
@@ -320,12 +329,12 @@ public class Script
 		
 		return "" + line;
 	}).setVarArgs();
-	public static final Command RETURN = add("return").setFunc((ctx, objs) ->
+	public static final Command RETURN = add("return", VOID, "Marks the end of a label or code section.").setFunc((ctx, objs) ->
 	{
 		ctx.popStack();
 		return ctx.prev();
 	});
-	public static final Command SLEEP = add("sleep", CmdArg.INT).setFunc((ctx, objs) ->
+	public static final Command SLEEP = add("sleep", VOID, "Sleep the given number of milliseconds.", CmdArg.INT).setFunc((ctx, objs) ->
 	{
 		try
 		{
@@ -335,41 +344,41 @@ public class Script
 		{
 			e.printStackTrace();
 		}
-		return "" + (int) objs[0];
+		return ctx.prev();
 	});
 
-	public static final Command MOUSE_MOVE = add("mouse_move", CmdArg.INT, CmdArg.INT).setFunc((ctx, objs) ->
+	public static final Command MOUSE_MOVE = add("mouse_move", VOID, "Move mouse to the X, Y supplied.", CmdArg.INT, CmdArg.INT).setFunc((ctx, objs) ->
 	{
 		ctx.rob.mouseMove((int) objs[0], (int) objs[1]);
 		return ctx.prev();
 	});
 	
-	public static final Command KEY_PRESS = keyCommand("key_press", (key, ctx, objs) ->
+	public static final Command KEY_PRESS = keyCommand("key_press", "Presses the key down (does not release automatically).", (key, ctx, objs) ->
 	{
 		ctx.rob.keyPress(key);
 	}, CmdArg.TOKEN);
 	
-	public static final Command KEY_RELEASE = keyCommand("key_release", (key, ctx, objs) ->
+	public static final Command KEY_RELEASE = keyCommand("key_release", "Releases the key.", (key, ctx, objs) ->
 	{
 		ctx.rob.keyRelease(key);
 	}, CmdArg.TOKEN);
 	
-	public static final Command KEY = keyCommand("key", (key, ctx, objs) ->
+	public static final Command KEY = keyCommand("key", "Presses the key for the given # of ms, then releases it.", (key, ctx, objs) ->
 	{
 		ctx.rob.keyPress(key);
 		ctx.rob.delay((int) objs[1]);
 		ctx.rob.keyRelease(key);
 	}, CmdArg.TOKEN, CmdArg.INT);
 	
-	public static final Command AUTO_DELAY = add("set_robot_delay", CmdArg.INT).setFunc((ctx, objs) ->
+	public static final Command AUTO_DELAY = add("set_robot_delay", VOID, "Sets the automatic delay after robot operations (default 300 ms).", CmdArg.INT).setFunc((ctx, objs) ->
 	{
 		ctx.rob.setAutoDelay((int) objs[0]);
-		return "" + ctx.rob.getAutoDelay();
+		return ctx.prev();
 	});
 	
-	private static Command keyCommand(String name, KeyFunc k, CmdArg<?>... args)
+	private static Command keyCommand(String name, String desc, KeyFunc k, CmdArg<?>... args)
 	{
-		return add(name, args).setFunc((ctx, objs) ->
+		return add(name, BOOL, desc, args).setFunc((ctx, objs) ->
 		{
 			try
 			{
@@ -380,7 +389,7 @@ public class Script
 			}
 			catch (NoSuchFieldException | IllegalArgumentException | IllegalAccessException e)
 			{
-				e.printStackTrace();
+				ctx.exceptionCallback.accept(e);
 				return "" + false;
 			}
 		});
@@ -410,7 +419,7 @@ public class Script
 	
 	private static Command userReqType(String name, CmdArg<?> type, String userPromptType)
 	{
-		return add(name, CmdArg.TOKEN).setFunc((ctx, objs) ->
+		return add(name, BOOL, "Requests user input of type: " + userPromptType + ", returns true on successful input.", CmdArg.TOKEN).setFunc((ctx, objs) ->
 		{
 			if (ctx.userRequestType.reqType((String[]) objs[0], type, userPromptType))
 				return TRUE;
@@ -422,6 +431,11 @@ public class Script
 	public static interface UserReqType
 	{
 		public boolean reqType(String[] vars, CmdArg<?> type, String userPromptType);
+	}
+	@FunctionalInterface
+	public static interface Debugger
+	{
+		public void info(String command, String args, String retrn);
 	}
 	
 	/////////////////////////////////////////////
@@ -742,6 +756,7 @@ public class Script
 				if (varArgs)
 					objs[objs.length - 1] = Array.newInstance(args[args.length - 1].cls, argStrs.length - args.length + 1);
 				
+				String input = "";
 				for (int argInd = 0; argInd < argStrs.length; argInd++)
 				{
 					CmdArg<?> arg = args[Math.min(argInd, args.length - 1)];
@@ -784,10 +799,10 @@ public class Script
 						
 						objs[objs.length - 1] = obj;
 					}
-				
+					input += trimmed + (argInd == argStrs.length - 1 ? "" : ", ");
 				}
 
-				RunnableCommand run = new RunnableCommand(cmd, objs);
+				RunnableCommand run = new RunnableCommand(cmd, input, objs);
 				return run;
 			}
 			else
@@ -907,6 +922,7 @@ public class Script
 			for (int i = 1; i < storing.length; i++)
 				putVar(storing[i], out);
 			prevCallback.accept(storing[0], out);
+			debugger.info(storing[0], cmd.getInput(), out);
 			if (!popped.isEmpty() && !popped.pop().returns)
 				break;
 			parseLine++;
@@ -1041,6 +1057,11 @@ public class Script
 		this.userRequestType = reqType;
 	}
 	
+	public void setDebugger(Debugger debug)
+	{
+		debugger = debug;
+	}
+	
 	public Consumer<String> getPrintCallback()
 	{
 		return printCallback;
@@ -1071,12 +1092,18 @@ public class Script
 		return userRequestType;
 	}
 	
+	public Debugger getDebugger()
+	{
+		return debugger;
+	}
+	
 	public void transferCallbacks(Script to)
 	{
 		to.setPrintCallback(getPrintCallback());
 		to.setErrorCallback(getErrorCallback());
 		to.setExceptionCallback(getExceptionCallback());
 		to.setParseExceptionCallback(getParseExceptionCallback());
+		to.setDebugger(getDebugger());
 	}
 	
 	//////////////////////
