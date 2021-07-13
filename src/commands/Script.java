@@ -59,7 +59,7 @@ public class Script
 	private Debugger debugger = (cmd, args, ret) -> {};
 	private Consumer<Exception> exceptionCallback = (exc) ->
 	{
-		errorCallback.accept("Exception encountered at line: " + (parseLine + 1) + "\n" + exc.toString());
+		errorCallback.accept("Exception encountered at line: " + (parseLine + 1) + "\r\n" + exc.toString());
 	};
 	private Consumer<String[]> userRequest = (vars) ->
 	{
@@ -88,6 +88,11 @@ public class Script
 		if (CMDS.put(name, cmd) != null)
 			throw new IllegalArgumentException("Cannot register two commands to the same name.");
 		return cmd;
+	}
+	
+	public static Command[] getAllCommands()
+	{
+		return CMDS.values().toArray(new Command[CMDS.size()]);
 	}
 	
 	public static String[] getAllCmds()
@@ -837,7 +842,7 @@ public class Script
 	public Script(Scanner scan) throws AWTException
 	{
 		rob = new Robot();
-		rob.setAutoDelay(300);
+		rob.setAutoDelay(170);
 		path = null;
 		String str = "";
 		int num = 0;
@@ -1104,6 +1109,8 @@ public class Script
 		to.setExceptionCallback(getExceptionCallback());
 		to.setParseExceptionCallback(getParseExceptionCallback());
 		to.setDebugger(getDebugger());
+		to.setPrevCallback(getPrevCallback());
+		to.setForceKill(forceKill);
 	}
 	
 	//////////////////////

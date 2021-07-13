@@ -48,6 +48,21 @@ public class Command
 		return rawArg[arg] || args[arg].rawToken(tok);
 	}
 	
+	public String getName()
+	{
+		return name;
+	}
+	
+	public String getReturn()
+	{
+		return ret;
+	}
+	
+	public String getDescription()
+	{
+		return desc;
+	}
+	
 	public String getArgInfo()
 	{
 		String str = "";
