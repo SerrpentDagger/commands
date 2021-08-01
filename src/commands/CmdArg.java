@@ -133,6 +133,24 @@ public abstract class CmdArg<T>
 		}
 	};
 	
+	public static final CmdArg<String> TYPE = new CmdArg<String>("Type", String.class)
+	{
+		@Override
+		public String parse(String trimmed)
+		{
+			return TOKEN.parse(trimmed);
+		}
+	};
+	
+	public static final CmdArg<String> SCRIPT_OBJECT = new CmdArg<String>("Object", String.class)
+	{
+		@Override
+		public String parse(String trimmed)
+		{
+			return TOKEN.parse(trimmed);
+		}
+	};
+	
 	public static final CmdArg<CmdString> STRING = new CmdArg<CmdString>("String", CmdString.class)
 	{
 		@Override
@@ -228,6 +246,36 @@ public abstract class CmdArg<T>
 			if (v == null || s == null)
 				return null;
 			return new VarSet(v, s);
+		}
+	};
+	
+	public static final CmdArg<BoolVarSet> BOOL_VAR_SET = new CmdArg<BoolVarSet>("Boolean VarName Value", BoolVarSet.class)
+	{
+		@Override
+		public boolean rawToken(int ind)
+		{
+			return ind == 1;
+		}
+		
+		@Override
+		public int tokenCount()
+		{
+			return 3;
+		}
+		
+		@Override
+		public BoolVarSet parse(String trimmed)
+		{
+			Boolean b;
+			String v;
+			CmdString s;
+			String[] tokens = Script.tokensOf(trimmed);
+			b = BOOLEAN.parse(tokens, 0);
+			v = TOKEN.parse(tokens, 1);
+			s = STRING.parse(tokens, 2);
+			if (b == null || v == null || s == null)
+				return null;
+			return new BoolVarSet(b, v, s);
 		}
 	};
 	

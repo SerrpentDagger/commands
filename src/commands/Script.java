@@ -3,6 +3,7 @@ package commands;
 import java.awt.AWTException;
 import java.awt.Robot;
 import java.awt.event.KeyEvent;
+import java.awt.event.MouseEvent;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.lang.reflect.Array;
@@ -25,29 +26,34 @@ import commands.Command.RunnableCommand;
 public class Script
 {
 	private static final LinkedHashMap<String, Command> CMDS = new LinkedHashMap<String, Command>();
+	private static final HashMap<String, ScriptObject<?>> OBJECTS = new HashMap<String, ScriptObject<?>>();
 	public static final String COMMENT = "//";
+	public static final char COMMENT_CHAR = '/';
 	public static final String LABEL = "--";
 	public static final String PREVIOUS = "PREV";
+	public static final String PARENT = "PARENT";
 	public static final String NULL = "null";
 	public static final String FALSE = "false", TRUE = "true";
-	public static final String END_FLAG = "END";
 	public static final String STORE = "->";
 	public static final char ARR_S = '[', ARR_E = ']', ARR_ACCESS = '.', ARR_SEP = ';';
 	public static final String ARR_LEN = "len";
 	public static final char STRING_CHAR = '"';
 	public static final char ESCAPE_CHAR = '\\';
+	public static final char VAR_ARG_ARRAY = '#';
 	public static final String INDEX = "INDEX";
 	public static final int NO_LABEL = -2;
 	public static final char UNRAW = '%', RAW = '$';
 	
-	public static final String BOOL = "boolean", VOID = "void", TOKEN = "Token", STRING = "String", INT = "int", DOUBLE = "double", VALUE = "Value";
+	public static final String BOOL = "boolean", VOID = "void", TOKEN = "token", STRING = "String", INT = "int", DOUBLE = "double", VALUE = "Value", OBJECT = "Object";
 	
 	public int parseLine = -1;
 	private final HashMap<String, String> vars = new HashMap<String, String>();
 	private final HashMap<String, Integer> labels = new HashMap<String, Integer>();
 	private final ArrayDeque<StackEntry> stack = new ArrayDeque<StackEntry>();
 	private final ArrayDeque<StackEntry> popped = new ArrayDeque<StackEntry>();
+	private Script parent = null;
 	public String path;
+	public String name = NULL;
 	public final String[] lines;
 	private Scanner keyIn;
 	public final Robot rob;
@@ -57,21 +63,18 @@ public class Script
 	private Consumer<String> errorCallback = (err) -> printCallback.accept(err);
 	private BiConsumer<CommandParseException, String> parseExceptionCallback = (exc, err) -> { exc.printStackTrace(); };
 	private Debugger debugger = (cmd, args, ret) -> {};
+	private Debugger oldDebug = debugger;
+	private boolean printingDebug = false;
 	private Consumer<Exception> exceptionCallback = (exc) ->
 	{
 		errorCallback.accept("Exception encountered at line: " + (parseLine + 1) + "\r\n" + exc.toString());
 	};
-	private Consumer<String[]> userRequest = (vars) ->
-	{
-		for (String var : vars)
-			putVar(var, keyIn.next());
-	};
-	private UserReqType userRequestType = (vars, type, prompt) ->
+	private UserReqType userRequestType = (ctx, vars, type, prompt) ->
 	{
 		for (String var : vars)
 		{
 			String in = keyIn.next().trim();
-			if (!putVarType(var, in, type, prompt))
+			if (!ctx.putVarType(var, in, type, prompt))
 				return false;
 		}
 		return true;
@@ -88,6 +91,17 @@ public class Script
 		if (CMDS.put(name, cmd) != null)
 			throw new IllegalArgumentException("Cannot register two commands to the same name.");
 		return cmd;
+	}
+	
+	public static <SO> ScriptObject<SO> add(String type, String desc, Class<SO> cl, CmdArg<?>... constArgs)
+	{
+		ScriptObject<SO> so = new ScriptObject<SO>(type, desc, cl, constArgs);
+		if (OBJECTS.put(type, so) != null)
+			throw new IllegalArgumentException("Cannot register two ScriptObject types of the same name.");
+		
+		newObjOf(so);
+		
+		return so;
 	}
 	
 	public static Command[] getAllCommands()
@@ -140,6 +154,30 @@ public class Script
 			ctx.putVar(var.var, var.set.raw);
 		return ctx.prev();
 	}).setVarArgs();
+	public static final Command VAR_IF = add("var_if", VOID, "If the boolean is true, sets the variable to the value.", CmdArg.BOOL_VAR_SET).setFunc((ctx, objs) ->
+	{
+		BoolVarSet[] vars = (BoolVarSet[]) objs[0];
+		for (BoolVarSet var : vars)
+			if (var.bool)
+				ctx.putVar(var.var, var.set.raw);
+		return ctx.prev();
+	}).setVarArgs();
+	public static final Command VAR_IF_NOT = add("var_if_not", VOID, "If the boolean is false, sets the variable to the value.", CmdArg.BOOL_VAR_SET).setFunc((ctx, objs) ->
+	{
+		BoolVarSet[] vars = (BoolVarSet[]) objs[0];
+		for (BoolVarSet var : vars)
+			if (!var.bool)
+				ctx.putVar(var.var, var.set.raw);
+		return ctx.prev();
+	}).setVarArgs();
+	public static final Command VAR_IF_NOT_VAR = add("var_if_not_var", VOID, "Sets a variable to a value, if the variable does not already exist.", CmdArg.VAR_SET).setFunc((ctx, objs) ->
+	{
+		VarSet[] vars = (VarSet[]) objs[0];
+		for (VarSet var : vars)
+			if (ctx.getVar(var.var) == null)
+				ctx.putVar(var.var, var.set.raw);
+		return ctx.prev();
+	}).setVarArgs();
 	public static final Command IS_VAR = add("is_var", BOOL, "Checks whether or not the token is a variable.", CmdArg.TOKEN).setFunc((ctx, objs) ->
 	{
 		String[] vars = (String[]) objs[0];
@@ -147,7 +185,7 @@ public class Script
 			if (ctx.getVar(var) == null)
 				return FALSE;
 		return TRUE;
-	}).setVarArgs();
+	}).rawArg(0).setVarArgs();
 	public static final Command IS_NUMBER = add("is_number", BOOL, "Checks whether or not the token is a number.", CmdArg.TOKEN).setFunc((ctx, objs) ->
 	{
 		String[] vars = (String[]) objs[0];
@@ -158,17 +196,46 @@ public class Script
 				return FALSE;
 		}
 		return TRUE;
-	}).setVarArgs();
+	}).rawArg(0).setVarArgs();
 	public static final Command IS_ARRAY = add("is_array", BOOL, "Checks whether or not the token is an array.", CmdArg.TOKEN).setFunc((ctx, objs) ->
 	{
-		String[] vars = (String[]) objs[0];
-		for (String var : vars)
-		{
-			if (!ctx.isArray(var))
-				return FALSE;
-		}
+		String var = (String) objs[0];
+		if (!ctx.isArray(var))
+			return FALSE;
 		return TRUE;
-	}).setVarArgs();
+	}).rawArg(0);
+	public static final Command IS_TYPE = add("is_type", BOOL, "Checks whether or not the token represents a recognized type name.", CmdArg.TOKEN).setFunc((ctx, objs) ->
+	{
+		return "" + OBJECTS.containsKey(objs[0]);
+	});
+	public static final Command IS_OBJ = add("is_obj", BOOL, "Checks whether the token is a valid Object in the given Type.", CmdArg.TYPE, CmdArg.TOKEN).setFunc((ctx, objs) ->
+	{
+		String type = (String) objs[0];
+		if (!OBJECTS.containsKey(type))
+			ctx.parseExcept("Unrecognized type", type);
+		
+		return "" + OBJECTS.get(type).objs.containsKey(objs[1]);
+	});
+	public static final Command DESTROY = add("dest_obj", BOOL, "Destroys the Object of the given Type. Returns true if object existed.", CmdArg.TYPE, CmdArg.SCRIPT_OBJECT).setFunc((ctx, objs) ->
+	{
+		String type = (String) objs[0];
+		if (!OBJECTS.containsKey(type))
+			ctx.parseExcept("Unrecognized type", type);
+		
+		return "" + (OBJECTS.get(type).objs.remove((String) objs[1]) != null);
+	});
+	public static final Command GET_PARENT = add("get_parent", STRING, "Returns the name of the parent script # levels up, where 0 would target this script.", CmdArg.INT).setFunc((ctx, objs) ->
+	{
+		Script p = ctx;
+		int count = (Integer) objs[0];
+		for (int i = 0; i < count; i++)
+		{
+			p = p.parent;
+			if (p == null)
+				return NULL;
+		}
+		return p.name == null ? NULL : p.name;
+	});
 	public static final Command PRINT = add("print", STRING, "Prints and returns the supplied value.", CmdArg.STRING).setFunc((ctx, objs) ->
 	{
 		CmdString str = (CmdString) objs[0];
@@ -183,6 +250,14 @@ public class Script
 		});
 		return ctx.prev();
 	});
+	public static final Command PRINT_DEBUG = add("print_debug", VOID, "Sets whether or not debug information should be printed for every line execution.", CmdArg.BOOLEAN).setFunc((ctx, objs) ->
+	{
+		Boolean bool = (Boolean) objs[0];
+		
+		ctx.printDebug(bool);
+		
+		return ctx.prev();
+	});
 	public static final Command KEY_IN = add("key_in", VALUE, "Fills the variables with user-keyboard-input.", CmdArg.TOKEN).setFunc((ctx, objs) ->
 	{
 		String[] vars = (String[]) objs[0];
@@ -195,12 +270,7 @@ public class Script
 		}
 		return next;
 	}).rawArg(0).setVarArgs();
-	public static final Command USER_REQ = add("user_req", VOID, "Requests values from the user as set by the Commands library implementor.", CmdArg.TOKEN).setFunc((ctx, objs) ->
-	{
-		ctx.userRequest.accept((String[]) objs[0]);
-		return ctx.prev();
-	}).setVarArgs();
-	
+	public static final Command USER_REQ = userReqType("user_req", CmdArg.STRING, "String");
 	public static final Command USER_REQ_INT = userReqType("user_req_int", CmdArg.INT, "integer");
 	public static final Command USER_REQ_DOUBLE = userReqType("user_req_double", CmdArg.DOUBLE, "double");
 	public static final Command USER_REQ_STRING = userReqType("user_req_string", CmdArg.STRING, "text");
@@ -234,6 +304,10 @@ public class Script
 		Object[] arr = (Object[]) objs[0];
 		return "" + operate((double) arr[0] * (double) arr[0], arr, (all, next) -> all / next);
 	}).setVarArgs();
+	public static final Command MODULO = add("mod", DOUBLE, "Returns A % B.", CmdArg.DOUBLE, CmdArg.DOUBLE).setFunc((ctx, objs) ->
+	{
+		return "" + (Double) objs[0] % (Double) objs[1];
+	});
 	public static final Command INCREMENT = add("inc", DOUBLE, "Returns the increment of the argument number.", CmdArg.DOUBLE).setFunc((ctx, objs) ->
 	{
 		return "" + ((double) objs[0] + 1);
@@ -241,6 +315,14 @@ public class Script
 	public static final Command DECREMENT = add("dec", DOUBLE, "Returns the decriment of the argument number.", CmdArg.DOUBLE).setFunc((ctx, objs) ->
 	{
 		return "" + ((double) objs[0] - 1);
+	});
+	public static final Command FLOOR = add("floor", INT, "Returns the largest integer less than or equal to this double.", CmdArg.DOUBLE).setFunc((ctx, objs) ->
+	{
+		return "" + Math.floor((double) objs[0]);
+	});
+	public static final Command CEIL = add("ceil", INT, "Returns the smallest integer greater than or equal to this double.", CmdArg.DOUBLE).setFunc((ctx, objs) ->
+	{
+		return "" + Math.ceil((double) objs[0]);
 	});
 	public static final Command NEGATE = add("negate", DOUBLE, "Returns the negation of the argument number.", CmdArg.DOUBLE).setFunc((ctx, objs) ->
 	{
@@ -334,6 +416,26 @@ public class Script
 		
 		return "" + line;
 	}).setVarArgs();
+	public static final Command SKIPTO = add("skipto", INT, "Skips excecution to the given token label, without modifying the stack.", CmdArg.TOKEN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
+	{
+		String label = (String) objs[0];
+		if (label.equals(NULL))
+			return "" + ctx.parseLine;
+		
+		int line = ctx.getLabelLine(label);
+		if (line == NO_LABEL)
+			ctx.parseExcept("Invalid label specification", label, "No label found.");
+		
+		for (int i = 0; i < ((VarSet[]) objs[1]).length; i++)
+		{
+			VarSet var = ((VarSet[]) objs[1])[i];
+			ctx.putVar(var.var, var.set.raw);
+		}
+		
+		ctx.parseLine = line;
+		
+		return "" + line;
+	}).setVarArgs();
 	public static final Command RETURN = add("return", VOID, "Marks the end of a label or code section.").setFunc((ctx, objs) ->
 	{
 		ctx.popStack();
@@ -358,6 +460,30 @@ public class Script
 		return ctx.prev();
 	});
 	
+	public static final Command MOUSE_PRESS = mouseCommand("mouse_press", "Presses the mouse button specified by a number > 0.", (mouse, ctx, objs) ->
+	{
+		ctx.rob.mousePress(mouse);
+	}, CmdArg.INT);
+	
+	public static final Command MOUSE_RELEASE = mouseCommand("mouse_release", "Releases the mouse button specified by a number > 0.", (mouse, ctx, objs) ->
+	{
+		ctx.rob.mouseRelease(mouse);
+	}, CmdArg.INT);
+	
+	public static final Command MOUSE = mouseCommand("mouse", "Presses the mouse button for the specified time, then releases it.", (mouse, ctx, objs) ->
+	{
+		ctx.rob.mousePress(mouse);
+		ctx.rob.delay((int) objs[1]);
+		ctx.rob.mouseRelease(mouse);
+	}, CmdArg.INT, CmdArg.INT);
+	
+	public static final Command MOUSE_CLICK = mouseCommand("mouse_click_at", "Clicks the given mouse button at the given position.", (mouse, ctx, objs) ->
+	{
+		ctx.rob.mouseMove((int) objs[1], (int) objs[2]);
+		ctx.rob.mousePress(mouse);
+		ctx.rob.mouseRelease(mouse);
+	}, CmdArg.INT, CmdArg.INT, CmdArg.INT);
+	
 	public static final Command KEY_PRESS = keyCommand("key_press", "Presses the key down (does not release automatically).", (key, ctx, objs) ->
 	{
 		ctx.rob.keyPress(key);
@@ -381,6 +507,23 @@ public class Script
 		return ctx.prev();
 	});
 	
+	private static Command mouseCommand(String name, String desc, KeyFunc m, CmdArg<?>... args)
+	{
+		return add(name, BOOL, desc, args).setFunc((ctx, objs) ->
+		{
+			try
+			{
+				int button = MouseEvent.getMaskForButton((int) objs[0]);
+				m.key(button, ctx, objs);
+				return TRUE;
+			}
+			catch (IllegalArgumentException e)
+			{
+				ctx.parseExcept("Invalid mouse button", "" + (int) objs[0], "The button ID must be between 1 and the number of buttons on your mouse, inclusive.");
+				return FALSE;
+			}
+		});
+	}
 	private static Command keyCommand(String name, String desc, KeyFunc k, CmdArg<?>... args)
 	{
 		return add(name, BOOL, desc, args).setFunc((ctx, objs) ->
@@ -426,7 +569,7 @@ public class Script
 	{
 		return add(name, BOOL, "Requests user input of type: " + userPromptType + ", returns true on successful input.", CmdArg.TOKEN).setFunc((ctx, objs) ->
 		{
-			if (ctx.userRequestType.reqType((String[]) objs[0], type, userPromptType))
+			if (ctx.userRequestType.reqType(ctx, (String[]) objs[0], type, userPromptType))
 				return TRUE;
 			else
 				return FALSE;
@@ -435,12 +578,35 @@ public class Script
 	@FunctionalInterface
 	public static interface UserReqType
 	{
-		public boolean reqType(String[] vars, CmdArg<?> type, String userPromptType);
+		public boolean reqType(Script ctx, String[] vars, CmdArg<?> type, String userPromptType);
 	}
 	@FunctionalInterface
 	public static interface Debugger
 	{
 		public void info(String command, String args, String retrn);
+	}
+	
+	///////////////
+	
+	public static <O> Command newObjOf(ScriptObject<O> scriptObj)
+	{
+		CmdArg<?>[] constArgs = scriptObj.getConstArgs();
+		CmdArg<?>[] args = new CmdArg<?>[constArgs.length + 1];
+		args[0] = CmdArg.TOKEN;
+		for (int i = 0; i < constArgs.length; i++)
+			args[i + 1] = constArgs[i];
+		String tn = scriptObj.getTypeName();
+		return add("new_" + scriptObj.getCommandName(), tn, "Constructs a new " + tn + ": " + scriptObj.getDescription(), args).setFunc((ctx, objs) ->
+		{
+			String name = (String) objs[0];
+			Object[] constObjs = new Object[objs.length - 1];
+			for (int i = 1; i < objs.length; i++)
+				constObjs[i - 1] = objs[i];
+			
+			scriptObj.construct(name, constObjs);
+			
+			return name;
+		});
 	}
 	
 	/////////////////////////////////////////////
@@ -480,25 +646,39 @@ public class Script
 		
 		String arg = "";
 		int quotes = 0;
+		int comment = 0;
 		for (int i = 0; i < line.length(); i++)
 		{
+			if (comment == 2)
+				break;
+			
 			boolean escaped = i > 0 && line.charAt(i - 1) == ESCAPE_CHAR;
 			char parseChar = line.charAt(i);
 			
 			if (!escaped)
+			{
 				quotes += sameChar(parseChar, STRING_CHAR);
+				if (quotes % 2 != 1)
+				{
+					int com = sameChar(parseChar, COMMENT_CHAR);
+					comment = com == 0 ? 0 : comment + com;
+					if (comment == 2)
+						arg = arg.substring(0, arg.length() - 1);
+				}
+			}
 			
 			boolean inQuote = quotes % 2 == 1;
-			boolean buildingArg = inQuote || parseChar != ',';
+			boolean commented = comment == 2;
+			boolean buildingArg = !commented && (inQuote || parseChar != ',');
 			
 			if (buildingArg)
 				arg += parseChar;
-			else
+			else if (!arg.trim().isEmpty())
 			{
 				args.add(arg.trim());
 				arg = "";
 			}
-			if (i == line.length() -1)
+			if (i == line.length() - 1)
 				args.add(arg.trim());
 		}
 		
@@ -859,6 +1039,7 @@ public class Script
 		}
 		lines = str.split("\n");
 		scan.close();
+		putVar(PARENT, NULL);
 	}
 	
 	public Script(File script) throws FileNotFoundException, AWTException
@@ -974,7 +1155,8 @@ public class Script
 	{
 		other.vars.forEach((var, val) ->
 		{
-			vars.put(var, val);
+			if (!var.equals(PARENT))
+				vars.put(var, val);
 		});
 	}
 	
@@ -1065,6 +1247,22 @@ public class Script
 	public void setDebugger(Debugger debug)
 	{
 		debugger = debug;
+		oldDebug = debug;
+		printingDebug = false;
+	}
+	
+	public void printDebug(boolean bool)
+	{
+		printingDebug = bool;
+		if (bool)
+		{
+			oldDebug = debugger;
+			debugger = (cmd, args, ret) -> { printCallback.accept(cmd + "(" + args + ") -> " + ret); };
+		}
+		else
+		{
+			debugger = oldDebug;
+		}
 	}
 	
 	public Consumer<String> getPrintCallback()
@@ -1097,6 +1295,11 @@ public class Script
 		return userRequestType;
 	}
 	
+	public boolean printingDebug()
+	{
+		return printingDebug;
+	}
+	
 	public Debugger getDebugger()
 	{
 		return debugger;
@@ -1111,6 +1314,18 @@ public class Script
 		to.setDebugger(getDebugger());
 		to.setPrevCallback(getPrevCallback());
 		to.setForceKill(forceKill);
+		to.setUserReqestType(getUserReqType());
+	}
+	
+	public Script setParent(Script parent)
+	{
+		this.parent = parent;
+		return this;
+	}
+	
+	public Script getParent()
+	{
+		return parent;
 	}
 	
 	//////////////////////
