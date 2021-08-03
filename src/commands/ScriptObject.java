@@ -33,6 +33,8 @@ public class ScriptObject<T extends Object>
 	
 	public void construct(String name, Object[] params)
 	{
+		if (constructor == null)
+			throw new IllegalStateException("Null constructor for ScriptObject of type: " + typeName);
 		objs.put(name, constructor.construct(params));
 	}
 	

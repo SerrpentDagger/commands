@@ -138,7 +138,10 @@ public abstract class CmdArg<T>
 		@Override
 		public String parse(String trimmed)
 		{
-			return TOKEN.parse(trimmed);
+			String type = TOKEN.parse(trimmed);
+			if (Script.isType(type))
+				return type;
+			return null;
 		}
 	};
 	
@@ -280,27 +283,6 @@ public abstract class CmdArg<T>
 	};
 	
 	////////////////////////////////////////
-	
-/*	public static <X> CmdArg<X[]> greedyArray(CmdArg<X> arg)
-	{
-		CmdArg<X[]> array = arrayOf(arg);
-		CmdArg<X[]> greedy = new CmdArg<X[]>(arg.type + "...")
-		{
-			@Override
-			public int tokenCount()
-			{
-				return -2;
-			}
-			
-			@Override
-			public X[] parse(String trimmed)
-			{
-				return array.parse(Script.ARR_S + trimmed + Script.ARR_E);
-			}
-		};
-		
-		return greedy;
-	}*/
 	
 	public static <X> CmdArg<X[]> arrayOf(CmdArg<X> arg)
 	{

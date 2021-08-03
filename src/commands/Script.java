@@ -40,9 +40,10 @@ public class Script
 	public static final char STRING_CHAR = '"';
 	public static final char ESCAPE_CHAR = '\\';
 	public static final char VAR_ARG_ARRAY = '#';
+	public static final String VAR_ARG_STR = "" + VAR_ARG_ARRAY;
 	public static final String INDEX = "INDEX";
 	public static final int NO_LABEL = -2;
-	public static final char UNRAW = '%', RAW = '$';
+	public static final char UNRAW = '%', RAW = '$', REF = '@';
 	
 	public static final String BOOL = "boolean", VOID = "void", TOKEN = "token", STRING = "String", INT = "int", DOUBLE = "double", VALUE = "Value", OBJECT = "Object";
 	
@@ -224,6 +225,16 @@ public class Script
 		
 		return "" + (OBJECTS.get(type).objs.remove((String) objs[1]) != null);
 	});
+	public static final Command OBJ_STRING = add("obj_string", STRING, "Returns the string representation of the object of the given type.", CmdArg.TYPE, CmdArg.SCRIPT_OBJECT).setFunc((ctx, objs) ->
+	{
+		String type = (String) objs[0];
+		String key = (String) objs[1];
+		Object obj = OBJECTS.get(type).objs.get(key);
+		if (obj == null)
+			return NULL;
+		
+		return obj.toString();
+	});
 	public static final Command GET_PARENT = add("get_parent", STRING, "Returns the name of the parent script # levels up, where 0 would target this script.", CmdArg.INT).setFunc((ctx, objs) ->
 	{
 		Script p = ctx;
@@ -256,6 +267,18 @@ public class Script
 		
 		ctx.printDebug(bool);
 		
+		return ctx.prev();
+	});
+	public static final Command PRINT_OBJS = add("print_all_objs", VOID, "Prints all the objects of all the types.").setFunc((ctx, objs) ->
+	{
+		OBJECTS.forEach((type, so) ->
+		{
+			ctx.printCallback.accept(type + ":");
+			so.objs.forEach((k, obj) ->
+			{
+				ctx.printCallback.accept("    " + k + "=" + obj.toString());
+			});
+		});
 		return ctx.prev();
 	});
 	public static final Command KEY_IN = add("key_in", VALUE, "Fills the variables with user-keyboard-input.", CmdArg.TOKEN).setFunc((ctx, objs) ->
@@ -627,6 +650,10 @@ public class Script
 		
 		return token.startsWith("" + STRING_CHAR) && token.endsWith("" + STRING_CHAR);
 	}
+	public static boolean isType(String token)
+	{
+		return OBJECTS.containsKey(token);
+	}
 	
 	public static String[] argsOf(String line)
 	{
@@ -834,7 +861,7 @@ public class Script
 		if (CmdArg.DOUBLE.parse(trm) != null && !array)
 			return trm;
 		
-		boolean unraw = token.charAt(0) == UNRAW;
+		boolean unraw = token.charAt(0) == UNRAW || token.charAt(0) == VAR_ARG_ARRAY;
 		boolean raw = token.charAt(0) == RAW;
 		
 		if (raw || (!unraw && (cmd.rawToken(argInd, tokInd)))) // If raw, return what's written.
@@ -842,8 +869,9 @@ public class Script
 		
 		if (array)
 		{
-			String var = getVar(trm);
-			return arrayReplace(cmd, argInd, tokInd, var == null ? trm : var);
+			String got = getVar(trm);
+			String var = arrPreFrom(trm) + got + arrPostFrom(trm);
+			return got == null ? arrayReplace(cmd, argInd, tokInd, trm) : var;
 		}
 		
 		String[] arrAcc = arrAccOf(trm);
@@ -874,8 +902,8 @@ public class Script
 		}
 		
 		String var = getVar(trm); // trm is not an array.
-		if (var != null && !raw) // If not raw, it is a request to use the contents of the variable. This may parse nested variables.
-			return varParse(cmd, argInd, tokInd, var);
+		if (var != null && !raw) // If not raw, it is a request to use the contents of the variable.
+			return var;
 		else
 			return trm;
 	}
@@ -896,8 +924,8 @@ public class Script
 		String post = "";
 		for (int i = token.length() - 1; i >= 0; i--)
 		{
-			if (token.charAt(i) == ARR_S)
-				post += ARR_S;
+			if (token.charAt(i) == ARR_E)
+				post += ARR_E;
 			else
 				return post;
 		}
@@ -905,7 +933,8 @@ public class Script
 	}
 	private static String varTrim(String str)
 	{
-		return str.trim().replaceFirst(quote(UNRAW), "").replaceFirst(quote(RAW), "");
+		return replaceIfFirst(replaceIfFirst(replaceIfFirst(str.trim(), UNRAW, ""), RAW, ""), VAR_ARG_STR, "");
+//		return str.trim().replaceFirst(quote(UNRAW), "").replaceFirst(quote(RAW), "").replaceFirst(quote(VAR_ARG_STR), "");
 	}
 	private static String getTrim(String str)
 	{
@@ -918,6 +947,18 @@ public class Script
 	private static String quote(char chr)
 	{
 		return quote("" + chr);
+	}
+	private static String replaceIfFirst(String str, char find, String rep)
+	{
+		return replaceIfFirst(str, "" + find, rep);
+	}
+	private static String replaceIfFirst(String str, String find, String rep)
+	{
+		if (str.isEmpty())
+			return str;
+		if (str.startsWith(find))
+			return str.replaceFirst(quote(find), rep);
+		return str;
 	}
 	
 	public RunnableCommand parse(String line)
@@ -933,8 +974,10 @@ public class Script
 			{
 				CmdArg<?>[] args = cmd.args;
 				boolean varArgs = cmd.isVarArgs();
-				boolean varArgArray = false;
-				if (argStrs.length != args.length && !(varArgs && argStrs.length >= args.length - 1))
+				boolean varArgArray = argStrs.length > 0 && argStrs[argStrs.length - 1].startsWith(VAR_ARG_STR);
+				if (varArgArray && !varArgs)
+					parseExcept("Var-Arg array cannot be specified for non-var-arg commands", line, argStrs[argStrs.length]);
+				if (argStrs.length != args.length && !(varArgs && argStrs.length >= args.length - 1 && !varArgArray))
 					parseExcept("Invalid argument count", line, name + " requires " + args.length + " args, but " + argStrs.length + " have been provided. Args are separated by commas.");
 				
 				Object[] objs = new Object[args.length];
@@ -950,7 +993,6 @@ public class Script
 					
 					String[] tokens = tokensOf(argStrs[argInd]);
 					
-					varArgArray = varArgArray || (firstVarArg && tokens.length == 1 && isArray(varTrim(tokens[0])));
 					if (varArgArray && !firstVarArg)
 						parseExcept("Invalid argument count", line, "If var-arg arguments are specified as an array, the array must be the last argument");
 					
@@ -1070,6 +1112,7 @@ public class Script
 		}
 		catch (Exception e)
 		{
+			e.printStackTrace();
 			this.exceptionCallback.accept(e);
 		}
 	}
@@ -1162,11 +1205,30 @@ public class Script
 	
 	public String getVar(String name)
 	{
-		return vars.get(getTrim(name));
+		String trm = getTrim(name);
+		String got = vars.get(trm);
+		boolean ref = got != null && got.startsWith("" + REF);
+		if (ref)
+			return getVar(got.substring(1));
+		
+		if (got != null && got.startsWith("" + ARR_S) && got.endsWith("" + ARR_E))
+		{
+			String[] elements = arrayElementsOf(got);
+			String out = "" + ARR_S;
+			for (int i = 0; i < elements.length; i++)
+			{
+				if (elements[i].startsWith("" + REF))
+					elements[i] = getVar(elements[i].substring(1));
+				out += elements[i] + (i == elements.length - 1 ? ARR_E : ARR_SEP + " ");
+			}
+			return out;
+		}
+		
+		return got;
 	}
 	public String prev()
 	{
-		return vars.get(PREVIOUS);
+		return getVar(PREVIOUS);
 	}
 	public static String arrayTrim(String token)
 	{
@@ -1257,7 +1319,7 @@ public class Script
 		if (bool)
 		{
 			oldDebug = debugger;
-			debugger = (cmd, args, ret) -> { printCallback.accept(cmd + "(" + args + ") -> " + ret); };
+			debugger = (cmd, args, ret) -> { printCallback.accept("      --  " + cmd + "(" + args + ") -> " + ret); };
 		}
 		else
 		{
