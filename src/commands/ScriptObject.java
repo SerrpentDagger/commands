@@ -2,7 +2,7 @@ package commands;
 
 import java.util.HashMap;
 
-public class ScriptObject<T extends Object>
+public class ScriptObject<T>
 {
 	public final HashMap<String, T> objs = new HashMap<String, T>();
 	
@@ -31,11 +31,33 @@ public class ScriptObject<T extends Object>
 		};
 	}
 	
-	public void construct(String name, Object[] params)
+	public void construct(Script ctx, String name, Object[] params)
 	{
 		if (constructor == null)
 			throw new IllegalStateException("Null constructor for ScriptObject of type: " + typeName);
-		objs.put(name, constructor.construct(params));
+		objs.put(name, constructor.construct(ctx, name, params));
+	}
+	
+	//////////
+	
+	@SafeVarargs
+	public static <SO> CmdArg<SO> supOf(String type, Class<SO> cl, ScriptObject<? extends SO>... exts)
+	{
+		return new CmdArg<SO>(type, cl)
+		{
+			@Override
+			public SO parse(String trimmed)
+			{
+				SO obj;
+				for (ScriptObject<? extends SO> ext : exts)
+				{
+					obj = ext.cmdArg.parse(trimmed);
+					if (obj != null)
+						return obj;
+				}
+				return null;
+			}
+		};
 	}
 	
 	///////////////////////////
@@ -75,6 +97,6 @@ public class ScriptObject<T extends Object>
 	
 	public interface SOConstruct<T>
 	{
-		public T construct(Object[] objs);
+		public T construct(Script ctx, String name, Object[] objs);
 	}
 }

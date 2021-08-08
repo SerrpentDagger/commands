@@ -10,6 +10,7 @@ import java.lang.reflect.Array;
 import java.lang.reflect.Field;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map.Entry;
@@ -21,6 +22,7 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.regex.Pattern;
 
+import arrays.AUtils;
 import commands.Command.RunnableCommand;
 
 public class Script
@@ -45,7 +47,7 @@ public class Script
 	public static final int NO_LABEL = -2;
 	public static final char UNRAW = '%', RAW = '$', REF = '@';
 	
-	public static final String BOOL = "boolean", VOID = "void", TOKEN = "token", STRING = "String", INT = "int", DOUBLE = "double", VALUE = "Value", OBJECT = "Object";
+	public static final String BOOL = "boolean", VOID = "void", TOKEN = "token", TOKEN_ARR = ARR_S + TOKEN + ARR_E, STRING = "String", INT = "int", DOUBLE = "double", VALUE = "Value", OBJECT = "Object";
 	
 	public int parseLine = -1;
 	private final HashMap<String, String> vars = new HashMap<String, String>();
@@ -66,9 +68,9 @@ public class Script
 	private Debugger debugger = (cmd, args, ret) -> {};
 	private Debugger oldDebug = debugger;
 	private boolean printingDebug = false;
-	private Consumer<Exception> exceptionCallback = (exc) ->
+	private Consumer<Throwable> exceptionCallback = (exc) ->
 	{
-		errorCallback.accept("Exception encountered at line: " + (parseLine + 1) + "\r\n" + exc.toString());
+		errorCallback.accept("Exception encountered at line: " + (parseLine + 1) + "\n" + exc.toString());
 	};
 	private UserReqType userRequestType = (ctx, vars, type, prompt) ->
 	{
@@ -102,6 +104,13 @@ public class Script
 		
 		newObjOf(so);
 		
+		return so;
+	}
+	
+	public static <SO> ScriptObject<SO> add(ScriptObject<SO> so)
+	{
+		if (OBJECTS.put(so.getTypeName(), so) != null)
+			throw new IllegalArgumentException("Cannot register two ScriptObject types of the same name.");
 		return so;
 	}
 	
@@ -177,6 +186,64 @@ public class Script
 		for (VarSet var : vars)
 			if (ctx.getVar(var.var) == null)
 				ctx.putVar(var.var, var.set.raw);
+		return ctx.prev();
+	}).setVarArgs();
+	public static final Command VAR_ARRAY = add("var_array", VOID, "Sets the variable to an array of the given length, filled with the given value.", CmdArg.VAR_INT_SET).setFunc((ctx, objs) ->
+	{
+		IntVarSet[] sets = (IntVarSet[]) objs[0];
+		for (IntVarSet set : sets)
+		{
+			String[] s = new String[set.i];
+			Arrays.setAll(s, (i) -> set.set.unraw);
+			ctx.putVar(set.var, toArrayString(s));
+		}
+		
+		return ctx.prev();
+	}).setVarArgs();
+	public static final Command VAR_ARRAY_FILL = add("var_array_fill", VOID, "Sets the variable to an array of the given length, filled with the return value of excecution of the given label for each index.", CmdArg.VAR_INT_TOK).setFunc((ctx, objs) ->
+	{
+		VarIntTok[] sets = (VarIntTok[]) objs[0];
+		for (VarIntTok set : sets)
+		{
+			int count = set.i;
+			String label = set.tok;
+			int line = ctx.getLabelLine(label);
+			if (line == NO_LABEL)
+				ctx.parseExcept("Invalid label specification", label, "No label found.");
+			String[] elements = new String[count];
+			for (int i = 0; i < count; i++)
+			{
+				ctx.putVar(INDEX, "" + i);
+				ctx.subRunFrom(line);
+				elements[i] = ctx.prev();
+			}
+			ctx.putVar(set.var, toArrayString(elements));
+		}
+		return ctx.prev();
+	}).setVarArgs();
+	public static final Command VAR_TO_INDEX = add("var_to_index", VOID, "Sets the value at an index in specified array.", CmdArg.VAR_INT_SET).setFunc((ctx, objs) ->
+	{
+		IntVarSet[] sets = (IntVarSet[]) objs[0];
+		
+		for (int i = 0; i < sets.length; i++)
+		{
+			String arr = sets[i].var;
+			if (!ctx.isArray(arr))
+				ctx.parseExcept("Attempt to set index value of non-array.", arr);
+			
+			String[] elements = arrayElementsOf(ctx.getVar(arr));
+			CmdString val = sets[i].set;
+			int index = sets[i].i;
+			if (index < 0)
+				elements = AUtils.extendPre(elements, -index, (ind) -> ind == 0 ? val.unraw : NULL);
+			else if (index >= elements.length)
+				elements = AUtils.extendPost(elements, 1 + index - elements.length, (ind) -> ind == index ? val.unraw : NULL);
+			else
+				elements[sets[i].i] = val.unraw;
+			
+			ctx.putVar(arr, toArrayString(elements));
+		}
+		
 		return ctx.prev();
 	}).setVarArgs();
 	public static final Command IS_VAR = add("is_var", BOOL, "Checks whether or not the token is a variable.", CmdArg.TOKEN).setFunc((ctx, objs) ->
@@ -308,6 +375,16 @@ public class Script
 			out += tokArr.unraw;
 		}
 		return out + "\"";
+	}).setVarArgs();
+	public static final Command ARR_MERGE = add("array_merge", TOKEN_ARR, "Merges arrays one onto the other in the order provided.", CmdArg.arrayOf(CmdArg.STRING)).setFunc((ctx, objs) ->
+	{
+		String out = "" + ARR_S;
+		CmdString[][] arrays = (CmdString[][]) objs[0];
+		for (int i = 0; i < arrays.length; i++)
+			for (int j = 0; j < arrays[i].length; j++)
+				out += arrays[i][j].raw + (i == arrays.length - 1 && j == arrays[i].length - 1 ? "" : ARR_SEP + " ");
+		
+		return out + ARR_E;
 	}).setVarArgs();
 	public static final Command ADD = add("add", DOUBLE, "Adds and returns the argument numbers.", CmdArg.DOUBLE).setFunc((ctx, objs) ->
 	{
@@ -626,7 +703,7 @@ public class Script
 			for (int i = 1; i < objs.length; i++)
 				constObjs[i - 1] = objs[i];
 			
-			scriptObj.construct(name, constObjs);
+			scriptObj.construct(ctx, name, constObjs);
 			
 			return name;
 		});
@@ -822,33 +899,39 @@ public class Script
 			
 			boolean inQuote = quotes % 2 == 1;
 			boolean inArray = arraysDeep > 0;
-			boolean inWord = parseChar != ' ' && parseChar != ',' && parseChar != ARR_SEP;
+			boolean inWord = parseChar != ',' && parseChar != ARR_SEP;
 			boolean buildingElement = inQuote || inArray || inWord;
 			
 			if (buildingElement)
 				ele += parseChar;
 			else if (!ele.isEmpty())
 			{
-				elements.add(ele);
+				elements.add(ele.trim());
 				ele = "";
 			}
 			if (i == str.length() - 1 && !ele.isEmpty())
-				elements.add(ele);
+				elements.add(ele.trim());
 		}
 		
 		return elements.toArray(new String[elements.size()]);
+	}
+	public static String toArrayString(String[] elements)
+	{
+		String out = "" + ARR_S;
+		for (int i = 0; i < elements.length; i++)
+			out += elements[i] + (i == elements.length - 1 ? "" : ARR_SEP + " ");
+		return out + ARR_E;
 	}
 	
 	///////////
 	
 	private String arrayReplace(Command cmd, int argInd, int tokInd, String array)
 	{
-		String inner = arrayTrim(array);
-		String[] innerTokens = tokensOf(inner);
+		String[] elements = arrayElementsOf(array);
 		String replaced = "" + ARR_S;
 		
-		for (int i = 0; i < innerTokens.length; i++)
-			replaced += varParse(cmd, argInd, tokInd, innerTokens[i]) + (i == innerTokens.length - 1 ? "" : ARR_SEP + " ");
+		for (int i = 0; i < elements.length; i++)
+			replaced += varParse(cmd, argInd, tokInd, elements[i]) + (i == elements.length - 1 ? "" : ARR_SEP + " ");
 		
 		return replaced + ARR_E;
 	}
@@ -1110,7 +1193,7 @@ public class Script
 		{
 			this.parseExceptionCallback.accept(e, e.getMessage());
 		}
-		catch (Exception e)
+		catch (Throwable e)
 		{
 			e.printStackTrace();
 			this.exceptionCallback.accept(e);
@@ -1219,8 +1302,9 @@ public class Script
 			{
 				if (elements[i].startsWith("" + REF))
 					elements[i] = getVar(elements[i].substring(1));
-				out += elements[i] + (i == elements.length - 1 ? ARR_E : ARR_SEP + " ");
+				out += elements[i] + (i == elements.length - 1 ? "" : ARR_SEP + " ");
 			}
+			out += ARR_E;
 			return out;
 		}
 		
@@ -1291,7 +1375,7 @@ public class Script
 		this.errorCallback = callback;
 	}
 	
-	public void setExceptionCallback(Consumer<Exception> callback)
+	public void setExceptionCallback(Consumer<Throwable> callback)
 	{
 		this.exceptionCallback = callback;
 	}
@@ -1342,7 +1426,7 @@ public class Script
 		return errorCallback;
 	}
 	
-	public Consumer<Exception> getExceptionCallback()
+	public Consumer<Throwable> getExceptionCallback()
 	{
 		return exceptionCallback;
 	}

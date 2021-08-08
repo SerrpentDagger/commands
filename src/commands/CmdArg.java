@@ -282,6 +282,96 @@ public abstract class CmdArg<T>
 		}
 	};
 	
+	public static final CmdArg<IntVarSet> INT_VAR_SET = new CmdArg<IntVarSet>("Integer VarName Value", IntVarSet.class)
+	{
+		@Override
+		public boolean rawToken(int ind)
+		{
+			return ind == 1;
+		}
+		
+		@Override
+		public int tokenCount()
+		{
+			return 3;
+		}
+		
+		@Override
+		public IntVarSet parse(String trimmed)
+		{
+			Integer i;
+			String v;
+			CmdString s;
+			String[] tokens = Script.tokensOf(trimmed);
+			i = INT.parse(tokens, 0);
+			v = TOKEN.parse(tokens, 1);
+			s = STRING.parse(tokens, 2);
+			if (i == null || v == null || s == null)
+				return null;
+			return new IntVarSet(i, v, s);
+		}
+	};
+
+	public static final CmdArg<IntVarSet> VAR_INT_SET = new CmdArg<IntVarSet>("VarName Integer Value", IntVarSet.class)
+	{
+		@Override
+		public boolean rawToken(int ind)
+		{
+			return ind == 0;
+		}
+		
+		@Override
+		public int tokenCount()
+		{
+			return 3;
+		}
+		
+		@Override
+		public IntVarSet parse(String trimmed)
+		{
+			Integer i;
+			String v;
+			CmdString s;
+			String[] tokens = Script.tokensOf(trimmed);
+			v = TOKEN.parse(tokens, 0);
+			i = INT.parse(tokens, 1);
+			s = STRING.parse(tokens, 2);
+			if (i == null || v == null || s == null)
+				return null;
+			return new IntVarSet(i, v, s);
+		}
+	};
+	
+	public static final CmdArg<VarIntTok> VAR_INT_TOK = new CmdArg<VarIntTok>("VarName Integer Token", VarIntTok.class)
+	{
+		@Override
+		public boolean rawToken(int ind)
+		{
+			return ind == 0;
+		}
+		
+		@Override
+		public int tokenCount()
+		{
+			return 3;
+		}
+		
+		@Override
+		public VarIntTok parse(String trimmed)
+		{
+			String v;
+			Integer i;
+			String t;
+			String[] tokens = Script.tokensOf(trimmed);
+			v = TOKEN.parse(tokens, 0);
+			i = INT.parse(tokens, 1);
+			t = TOKEN.parse(tokens, 2);
+			if (i == null || v == null || t == null)
+				return null;
+			return new VarIntTok(v, i, t);
+		}
+	};
+	
 	////////////////////////////////////////
 	
 	public static <X> CmdArg<X[]> arrayOf(CmdArg<X> arg)
@@ -294,8 +384,7 @@ public abstract class CmdArg<T>
 			{
 				if (!trimmed.startsWith("" + Script.ARR_S) || !trimmed.endsWith("" + Script.ARR_E))
 					return null;
-				String str = trimmed.substring(1, trimmed.length() - 1);
-				String[] tokens = Script.tokensOf(str);
+				String[] tokens = Script.arrayElementsOf(trimmed);
 				int count = arg.tokenCount();
 				if (tokens.length % count != 0)
 					return null;
