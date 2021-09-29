@@ -67,7 +67,15 @@ public class Command
 	{
 		String str = "";
 		for (int i = 0; i < args.length; i++)
-			str += args[i].type + (i == args.length - 1 ? "" : ", ");
+		{
+			String[] rt = args[i].type.split(" ");
+			for (int j = 0; j < rt.length; j++)
+			{
+				rt[j] = (args[i].rawToken(j) ? Script.RAW : "") + rt[j];
+				str += rt[j] + (j == rt.length - 1 ? "" : " ");
+			}
+			str += (i == args.length - 1 ? "" : ", ");
+		}
 		
 		if (isVarArgs)
 			str += "...";

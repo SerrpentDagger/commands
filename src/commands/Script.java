@@ -282,7 +282,7 @@ public class Script
 		if (!OBJECTS.containsKey(type))
 			ctx.parseExcept("Unrecognized type", type);
 		
-		return "" + OBJECTS.get(type).objs.containsKey(objs[1]);
+		return "" + OBJECTS.get(type).isObject((String) objs[1]);
 	});
 	public static final Command DESTROY = add("dest_obj", BOOL, "Destroys the Object of the given Type. Returns true if object existed.", CmdArg.TYPE, CmdArg.SCRIPT_OBJECT).setFunc((ctx, objs) ->
 	{
@@ -296,7 +296,7 @@ public class Script
 	{
 		String type = (String) objs[0];
 		String key = (String) objs[1];
-		Object obj = OBJECTS.get(type).objs.get(key);
+		Object obj = OBJECTS.get(type).getObject(key);
 		if (obj == null)
 			return NULL;
 		
@@ -496,11 +496,11 @@ public class Script
 		}
 		return ctx.prev();
 	});
-	public static final Command GOTO = add("goto", INT, "Excecutes the given token label, and returns the line number of that label.", CmdArg.TOKEN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
+	public static final Command GOTO = add("goto", VOID, "Excecutes the given token label.", CmdArg.TOKEN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
 	{
 		String label = (String) objs[0];
 		if (label.equals(NULL))
-			return "" + ctx.parseLine;
+			return ctx.prev();
 		
 		int line = ctx.getLabelLine(label);
 		if (line == NO_LABEL)
@@ -512,15 +512,16 @@ public class Script
 			ctx.putVar(var.var, var.set.raw);
 		}
 		
-		ctx.pushStack(line, true);
+		ctx.subRunFrom(line);
+		// ctx.pushStack(line, true);
 		
-		return "" + line;
+		return ctx.prev();
 	}).setVarArgs();
-	public static final Command SKIPTO = add("skipto", INT, "Skips excecution to the given token label, without modifying the stack.", CmdArg.TOKEN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
+	public static final Command SKIPTO = add("skipto", VOID, "Skips excecution to the given token label, without modifying the stack.", CmdArg.TOKEN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
 	{
 		String label = (String) objs[0];
 		if (label.equals(NULL))
-			return "" + ctx.parseLine;
+			return ctx.prev();
 		
 		int line = ctx.getLabelLine(label);
 		if (line == NO_LABEL)
@@ -534,11 +535,16 @@ public class Script
 		
 		ctx.parseLine = line;
 		
-		return "" + line;
+		return ctx.prev();
 	}).setVarArgs();
 	public static final Command RETURN = add("return", VOID, "Marks the end of a label or code section.").setFunc((ctx, objs) ->
 	{
 		ctx.popStack();
+		return ctx.prev();
+	});
+	public static final Command EXIT = add("exit", VOID, "Exits the script runtime.").setFunc((ctx, objs) ->
+	{
+		ctx.forceKill.set(true);
 		return ctx.prev();
 	});
 	public static final Command SLEEP = add("sleep", VOID, "Sleep the given number of milliseconds.", CmdArg.INT).setFunc((ctx, objs) ->
@@ -601,10 +607,16 @@ public class Script
 		ctx.rob.keyRelease(key);
 	}, CmdArg.TOKEN, CmdArg.INT);
 	
-	public static final Command AUTO_DELAY = add("set_robot_delay", VOID, "Sets the automatic delay after robot operations (default 300 ms).", CmdArg.INT).setFunc((ctx, objs) ->
+	public static final Command AUTO_DELAY = add("set_robot_delay", INT, "Sets the automatic delay after robot operations (default 300 ms). Returns the old delay.", CmdArg.INT).setFunc((ctx, objs) ->
 	{
+		int a = ctx.rob.getAutoDelay();
 		ctx.rob.setAutoDelay((int) objs[0]);
-		return ctx.prev();
+		return "" + a;
+	});
+	
+	public static final Command GET_AUTO_DELAY = add("get_robot_delay", INT, "Gets the automatic delay after robot operations.").setFunc((ctx, objs) ->
+	{
+		return "" + ctx.rob.getAutoDelay();
 	});
 	
 	private static Command mouseCommand(String name, String desc, KeyFunc m, CmdArg<?>... args)
@@ -1021,7 +1033,10 @@ public class Script
 	}
 	private static String getTrim(String str)
 	{
-		return varTrim(str).replaceAll(quote(ARR_S), "").replaceAll(quote(ARR_E), "");
+		String trm = varTrim(str);
+		if (!(trm.startsWith("" + ARR_S) && trm.endsWith("" + ARR_E)))
+				trm = trm.replaceAll(quote(ARR_S), "").replaceAll(quote(ARR_E), "");
+		return trm;
 	}
 	private static String quote(String str)
 	{

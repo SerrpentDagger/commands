@@ -1,6 +1,9 @@
 package commands;
 
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.concurrent.atomic.AtomicBoolean;
+import commands.Script.CommandParseException;
 
 public class ScriptObject<T>
 {
@@ -11,7 +14,8 @@ public class ScriptObject<T>
 	private String description;
 	private SOConstruct<T> constructor;
 	
-	private final CmdArg<T> cmdArg;
+	private CmdArg<T> cmdArg;
+	private final HashSet<ScriptObject<? extends T>> subs = new HashSet<>();
 	
 	////////////////////////////
 	
@@ -26,7 +30,18 @@ public class ScriptObject<T>
 			@Override
 			public T parse(String trimmed)
 			{
-				return objs.get(trimmed);
+				T obj = objs.get(trimmed), old = null;
+				if (obj != null)
+					return obj;
+				for (ScriptObject<? extends T> sub : subs)
+				{
+					obj = sub.cmdArg.parse(trimmed);
+					if (old != null && obj != null)
+						throw new CommandParseException("The key '" + trimmed + "' exists in at least two subtypes of " + typeName);
+					if (obj != null)
+						old = obj;					
+				}
+				return old;
 			}
 		};
 	}
@@ -38,9 +53,32 @@ public class ScriptObject<T>
 		objs.put(name, constructor.construct(ctx, name, params));
 	}
 	
+	public boolean isObject(String trimmed)
+	{
+		return cmdArg.parse(trimmed) != null;
+	}
+	
+	public T getObject(String trimmed)
+	{
+		return cmdArg.parse(trimmed);
+	}
+	
+	public boolean destroy(String trimmed)
+	{
+		AtomicBoolean out = new AtomicBoolean(false);
+		if (objs.remove(trimmed) != null)
+			out.set(true);
+		subs.forEach((sub) ->
+		{
+			if (sub.objs.remove(trimmed) != null)
+				out.set(true);
+		});
+		return true;
+	}
+	
 	//////////
 	
-	@SafeVarargs
+/*	@SafeVarargs
 	public static <SO> CmdArg<SO> supOf(String type, Class<SO> cl, ScriptObject<? extends SO>... exts)
 	{
 		return new CmdArg<SO>(type, cl)
@@ -58,6 +96,21 @@ public class ScriptObject<T>
 				return null;
 			}
 		};
+	} */
+	
+	public static <SO> ScriptObject<SO> supOf(String type, String description, Class<SO> cl, ScriptObject<? extends SO>[] subs, CmdArg<?>... constArgs)
+	{
+		ScriptObject<SO> sup = new ScriptObject<SO>(type, description, cl, constArgs);
+		for (ScriptObject<? extends SO> ext : subs)
+			sup.subs.add(ext);
+		return sup;
+	}
+	
+	public static <SUP, SUB extends SUP> ScriptObject<SUB> subOf(String type, String description, Class<SUB> cl, ScriptObject<SUP> sup, CmdArg<?>... constArgs)
+	{
+		ScriptObject<SUB> sub = new ScriptObject<SUB>(type, description, cl, constArgs);
+		sup.subs.add(sub);
+		return sub;
 	}
 	
 	///////////////////////////

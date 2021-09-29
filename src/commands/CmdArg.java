@@ -15,6 +15,8 @@ public abstract class CmdArg<T>
 		this.cls = cls;
 		if (tokenCount() < 0)
 			throw new IllegalStateException("Only positive token counts can be parsed.");
+		if (type.split(" ").length != tokenCount())
+			throw new IllegalStateException("CmdArg type names should correspond with their token counts.");
 	}
 	
 	public boolean rawToken(int ind) { return false; }
@@ -60,7 +62,7 @@ public abstract class CmdArg<T>
 		}
 	};
 	
-	public static final CmdArg<Color> COLOR = new CmdArg<Color>("Color", Color.class)
+	public static final CmdArg<Color> COLOR = new CmdArg<Color>("Red Green Blue", Color.class)
 	{
 		@Override
 		public int tokenCount()
