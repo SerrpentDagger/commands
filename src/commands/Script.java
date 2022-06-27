@@ -24,6 +24,8 @@ import java.util.regex.Pattern;
 
 import arrays.AUtils;
 import commands.Command.RunnableCommand;
+import commands.Scope.SNode;
+import utilities.StringUtils;
 
 public class Script
 {
@@ -31,32 +33,49 @@ public class Script
 	private static final HashMap<String, ScriptObject<?>> OBJECTS = new HashMap<String, ScriptObject<?>>();
 	public static final String COMMENT = "//";
 	public static final char COMMENT_CHAR = '/';
-	public static final String LABEL = "--";
+	public static final String LABEL = "--", SCOPED_LABEL = "~~";
+	public static final String LABEL_REG = LABEL + "|" + SCOPED_LABEL;
 	public static final String PREVIOUS = "PREV";
 	public static final String PARENT = "PARENT";
 	public static final String NULL = "null";
 	public static final String FALSE = "false", TRUE = "true";
 	public static final String STORE = "->";
+	public static final String INLINE_IF = "?";
+	public static final String INLINE_ELSE = ":";
+	public static final String MEMBER_ACCESS = ".";
 	public static final char ARR_S = '[', ARR_E = ']', ARR_ACCESS = '.', ARR_SEP = ';';
 	public static final String ARR_LEN = "len";
 	public static final char STRING_CHAR = '"';
 	public static final char ESCAPE_CHAR = '\\';
+	public static final char HELP_CHAR = '?';
 	public static final char VAR_ARG_ARRAY = '#';
+	public static final String END_SCRIPT = "==";
 	public static final String VAR_ARG_STR = "" + VAR_ARG_ARRAY;
+	public static final String HELP_CHAR_STR = "" + HELP_CHAR;
 	public static final String INDEX = "INDEX";
 	public static final int NO_LABEL = -2;
+	public static final Label GLOBAL = new Label("GLOBAL", 0, false);
 	public static final char UNRAW = '%', RAW = '$', REF = '@';
+	
+//	public static final Pattern ILLEGAL_VAR_CHARS = Pattern.compile("[]".formatted('\\' + HELP_CHAR));
 	
 	public static final String BOOL = "boolean", VOID = "void", TOKEN = "token", TOKEN_ARR = ARR_S + TOKEN + ARR_E, STRING = "String", INT = "int", DOUBLE = "double", VALUE = "Value", OBJECT = "Object";
 	
+	//////////////// Files
+	public static final String HIDDEN_SCRIPT = "--";
+	private static final String SEP = File.separator;
+	private static String SCRIPT_PATH = "scajl" + SEP;
+	private static String SCRIPT_EXT = ".scajl";
+	////////////////
+	
 	public int parseLine = -1;
-	private final HashMap<String, String> vars = new HashMap<String, String>();
-	private final HashMap<String, Integer> labels = new HashMap<String, Integer>();
+	private final Scope scope = new Scope();
+	private final HashMap<String, Label> labels = new HashMap<String, Label>();
 	private final ArrayDeque<StackEntry> stack = new ArrayDeque<StackEntry>();
 	private final ArrayDeque<StackEntry> popped = new ArrayDeque<StackEntry>();
 	private Script parent = null;
 	public String path;
-	public String name = NULL;
+	public String name = "BASE";
 	public final String[] lines;
 	private Scanner keyIn;
 	public final Robot rob;
@@ -83,16 +102,11 @@ public class Script
 		return true;
 	};
 	
-	public static Command get(String name)
-	{
-		return CMDS.get(name);
-	}
-	
 	public static Command add(String name, String ret, String desc, CmdArg<?>... args)
 	{
 		Command cmd = new Command(name, ret, desc, args);
 		if (CMDS.put(name, cmd) != null)
-			throw new IllegalArgumentException("Cannot register two commands to the same name.");
+			throw new IllegalArgumentException("Cannot register two commands to the same name: " + name);
 		return cmd;
 	}
 	
@@ -100,7 +114,7 @@ public class Script
 	{
 		ScriptObject<SO> so = new ScriptObject<SO>(type, desc, cl, constArgs);
 		if (OBJECTS.put(type, so) != null)
-			throw new IllegalArgumentException("Cannot register two ScriptObject types of the same name.");
+			throw new IllegalArgumentException("Cannot register two ScriptObject types of the same name: " + type);
 		
 		newObjOf(so);
 		
@@ -110,7 +124,7 @@ public class Script
 	public static <SO> ScriptObject<SO> add(ScriptObject<SO> so)
 	{
 		if (OBJECTS.put(so.getTypeName(), so) != null)
-			throw new IllegalArgumentException("Cannot register two ScriptObject types of the same name.");
+			throw new IllegalArgumentException("Cannot register two ScriptObject types of the same name: " + so.getTypeName());
 		return so;
 	}
 	
@@ -207,14 +221,14 @@ public class Script
 		{
 			int count = set.i;
 			String label = set.tok;
-			int line = ctx.getLabelLine(label);
-			if (line == NO_LABEL)
+			Label lab = ctx.getLabel(label);
+			if (lab == null)
 				ctx.parseExcept("Invalid label specification", label, "No label found.");
 			String[] elements = new String[count];
 			for (int i = 0; i < count; i++)
 			{
 				ctx.putVar(INDEX, "" + i);
-				ctx.subRunFrom(line);
+				ctx.subRunFrom(lab);
 				elements[i] = ctx.prev();
 			}
 			ctx.putVar(set.var, toArrayString(elements));
@@ -243,6 +257,14 @@ public class Script
 			
 			ctx.putVar(arr, toArrayString(elements));
 		}
+		
+		return ctx.prev();
+	}).setVarArgs();
+	public static final Command MAKE_GLOBAL = add("make_global", VOID, "Makes each variable token global in scope.", CmdArg.TOKEN).setFunc((ctx, objs) ->
+	{
+		String[] vars = (String[]) objs[0];
+		for (String var : vars)
+			ctx.scope.makeGlobal(var);
 		
 		return ctx.prev();
 	}).setVarArgs();
@@ -316,16 +338,28 @@ public class Script
 	});
 	public static final Command PRINT = add("print", STRING, "Prints and returns the supplied value.", CmdArg.STRING).setFunc((ctx, objs) ->
 	{
-		CmdString str = (CmdString) objs[0];
-		ctx.printCallback.accept(str.unraw);
-		return str.raw;
-	});
+		CmdString[] strs = (CmdString[]) objs[0];
+		String out = "";
+		for (CmdString str : strs)
+			out += str.unraw;
+		ctx.printCallback.accept(out);
+		return out;
+	}).setVarArgs();
 	public static final Command PRINT_VARS = add("print_all_vars", VOID, "Prints all variables and their values.").setFunc((ctx, objs) ->
 	{
-		ctx.vars.forEach((var, val) ->
+		ctx.printCallback.accept("----------------");
+		AtomicInteger lastLvl = new AtomicInteger(-1);
+		ctx.scope.forEach((lvl, label, var, val) ->
 		{
-			ctx.printCallback.accept(var + "=" + val);
+			String spacer = StringUtils.mult("  ", lvl);
+			if (lastLvl.get() != lvl)
+			{
+				ctx.printCallback.accept(StringUtils.mult("~~", lvl + 2) + label.name + ":");
+				lastLvl.set(lvl);
+			}
+			ctx.printCallback.accept(spacer + " " + var + "=" + val);
 		});
+		ctx.printCallback.accept("----------------");
 		return ctx.prev();
 	});
 	public static final Command PRINT_DEBUG = add("print_debug", VOID, "Sets whether or not debug information should be printed for every line execution.", CmdArg.BOOLEAN).setFunc((ctx, objs) ->
@@ -472,13 +506,13 @@ public class Script
 	{
 		int count = (int) objs[0];
 		String label = (String) objs[1];
-		int line = ctx.getLabelLine(label);
-		if (line == NO_LABEL)
+		Label lab = ctx.getLabel(label);
+		if (lab == null)
 			ctx.parseExcept("Invalid label specification", label, "No label found.");
 		for (int i = 0; i < count; i++)
 		{
 			ctx.putVar(INDEX, "" + i);
-			ctx.subRunFrom(line);
+			ctx.subRunFrom(lab);
 		}
 		return ctx.prev();
 	});
@@ -486,33 +520,27 @@ public class Script
 	{
 		boolean bool = (boolean) objs[0];
 		int wL = ctx.parseLine;
-		int line = ctx.getLabelLine((String) objs[1]);
-		if (line == NO_LABEL)
+		Label lab = ctx.getLabel((String) objs[1]);
+		if (lab == null)
 			ctx.parseExcept("Invalid label specification", (String) objs[1], "No label found.");
 		if (bool)
 		{
-			ctx.subRunFrom(line);
+			ctx.subRunFrom(lab);
 			ctx.parseLine = wL - 1;
 		}
 		return ctx.prev();
 	});
-	public static final Command GOTO = add("goto", VOID, "Excecutes the given token label.", CmdArg.TOKEN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
+	public static final Command GOTO = add("goto", VOID, "Excecutes the given token label in a new stack entry. Sets variables to values provided.", CmdArg.TOKEN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
 	{
 		String label = (String) objs[0];
 		if (label.equals(NULL))
 			return ctx.prev();
 		
-		int line = ctx.getLabelLine(label);
-		if (line == NO_LABEL)
+		Label lab = ctx.getLabel(label);
+		if (lab == null)
 			ctx.parseExcept("Invalid label specification", label, "No label found.");
 		
-		for (int i = 0; i < ((VarSet[]) objs[1]).length; i++)
-		{
-			VarSet var = ((VarSet[]) objs[1])[i];
-			ctx.putVar(var.var, var.set.raw);
-		}
-		
-		ctx.subRunFrom(line);
+		ctx.subRunFrom(lab, (VarSet[]) objs[1]);
 		// ctx.pushStack(line, true);
 		
 		return ctx.prev();
@@ -523,8 +551,8 @@ public class Script
 		if (label.equals(NULL))
 			return ctx.prev();
 		
-		int line = ctx.getLabelLine(label);
-		if (line == NO_LABEL)
+		Label lab = ctx.getLabel(label);
+		if (lab == null)
 			ctx.parseExcept("Invalid label specification", label, "No label found.");
 		
 		for (int i = 0; i < ((VarSet[]) objs[1]).length; i++)
@@ -533,15 +561,96 @@ public class Script
 			ctx.putVar(var.var, var.set.raw);
 		}
 		
-		ctx.parseLine = line;
+		ctx.parseLine = lab.line;
 		
 		return ctx.prev();
 	}).setVarArgs();
-	public static final Command RETURN = add("return", VOID, "Marks the end of a label or code section.").setFunc((ctx, objs) ->
+	public static final Command RETURN = add("return", VOID, "Marks the end of a label or code section. If present, will set PREV to argument, or array of arguments if more than one is provided.", CmdArg.TOKEN).setFunc((ctx, objs) ->
 	{
-		ctx.popStack();
-		return ctx.prev();
-	});
+		String[] rets = (String[]) objs[0];
+		if (rets.length == 0)
+		{
+			SNode last = ctx.popStack();
+			return last.get(PREVIOUS);
+		}
+		else if (rets.length == 1)
+			return rets[0];
+		else
+		{
+			String out = "" + ARR_S;
+			for (int i = 0; i < rets.length; i++)
+				out += rets[i] + (i == rets.length - 1 ? ARR_E : " " + ARR_SEP);
+			return out;
+		}
+	}).setVarArgs();
+	public static final Command RUN_SCRIPT = add("run_script", Script.VOID, "Runs the given script. Booleans determine whether variables in this script will be given to other before being run, and whether variables in other will be pulled to this script once finished.", CmdArg.STRING, CmdArg.BOOLEAN, CmdArg.BOOLEAN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
+	{
+		CmdString name = (CmdString) objs[0];
+		File scr = getScriptFile(name.unraw);
+		if (scr == null)
+			ctx.parseExcept("Specified script does not exist", name.unraw);
+		
+		Script script;
+		String out = ctx.prev();
+		try
+		{
+			script = new Script(scr);
+			ctx.transferCallbacks(script);
+			if ((boolean) objs[1])
+				script.integrateVarsFrom(ctx);
+			
+			script.putVar(Script.PARENT, ctx.name);
+			script.name = name.unraw;
+			script.run((VarSet[]) objs[3]);
+			
+			if ((boolean) objs[2])
+				ctx.integrateVarsFrom(script);
+			
+			out = script.prev();
+		}
+		catch (FileNotFoundException | AWTException e)
+		{
+			ctx.getExceptionCallback().accept(e);
+		}
+		return out;
+	}).setVarArgs();
+	public static final Command RUN_SCRIPT_LABEL = add("run_script_label", Script.VOID, "Runs the given script from the given label. Booleans are the same as those of 'run_script'.", CmdArg.STRING, CmdArg.STRING, CmdArg.BOOLEAN, CmdArg.BOOLEAN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
+	{
+		CmdString name = (CmdString) objs[0];
+		File scr = getScriptFile(name.unraw);
+		if (scr == null)
+			ctx.parseExcept("Specified script does not exist", name.unraw);
+		
+		Script script;
+		String out = ctx.prev();
+		try
+		{
+			script = new Script(scr);
+			ctx.transferCallbacks(script);
+			if ((boolean) objs[2])
+				script.integrateVarsFrom(ctx);
+			
+			CmdString label = (CmdString) objs[1];
+			Label lab = script.getLabel(label.unraw);
+			if (lab != null)
+			{
+				script.putVar(Script.PARENT, ctx.name);
+				script.name = name.unraw;
+				script.subRunFrom(lab, (VarSet[]) objs[4]);
+				if ((boolean) objs[3])
+					ctx.integrateVarsFrom(script);
+				
+				out = script.prev();
+			}
+			else
+				ctx.parseExcept("Specified label does not exist", label.unraw, "Script: " + name.unraw);
+		}
+		catch (FileNotFoundException | AWTException e)
+		{
+			ctx.getExceptionCallback().accept(e);
+		}
+		return out;
+	}).setVarArgs();
 	public static final Command EXIT = add("exit", VOID, "Exits the script runtime.").setFunc((ctx, objs) ->
 	{
 		ctx.forceKill.set(true);
@@ -708,7 +817,7 @@ public class Script
 		for (int i = 0; i < constArgs.length; i++)
 			args[i + 1] = constArgs[i];
 		String tn = scriptObj.getTypeName();
-		return add("new_" + scriptObj.getCommandName(), tn, "Constructs a new " + tn + ": " + scriptObj.getDescription(), args).setFunc((ctx, objs) ->
+		return scriptObj.add("new", tn, "Constructs a new " + tn + ": " + scriptObj.getDescription(), args).setFunc((ctx, objs) ->
 		{
 			String name = (String) objs[0];
 			Object[] constObjs = new Object[objs.length - 1];
@@ -948,18 +1057,37 @@ public class Script
 		return replaced + ARR_E;
 	}
 	
+	public <T> T valParse(CmdArg<T> arg, String[] tokens, String line)
+	{
+		int count = arg.tokenCount();
+		if (tokens.length != count)
+			parseExcept("Invalid token count", line, "Argument requires " + count + " tokens, but " + tokens.length + " have been provided. Tokens are separated by spaces.");
+	
+		String trimmed = "";
+		for (int tokInArg = 0; tokInArg < count; tokInArg++)
+			trimmed += varParse(null, 0, tokInArg, tokens[tokInArg]) + " ";
+		
+		trimmed = trimmed.trim();
+		T obj = arg.parse(trimmed);
+		
+		if (obj == null)
+			parseExcept("Invalid token resolution", trimmed, "Expected type: " + arg.type);
+		
+		return obj;
+	}
+	
 	public String varParse(Command cmd, int argInd, int tokInd, String token)
 	{
 		String trm = varTrim(token);
 		
 		boolean array = isArray(token);
-		if (CmdArg.DOUBLE.parse(trm) != null && !array)
+		if (!array && CmdArg.DOUBLE.parse(trm) != null)
 			return trm;
 		
 		boolean unraw = token.charAt(0) == UNRAW || token.charAt(0) == VAR_ARG_ARRAY;
 		boolean raw = token.charAt(0) == RAW;
 		
-		if (raw || (!unraw && (cmd.rawToken(argInd, tokInd)))) // If raw, return what's written.
+		if (raw || (!unraw && (cmd != null && cmd.rawToken(argInd, tokInd)))) // If raw, return what's written.
 			return trm;
 		
 		if (array)
@@ -1059,76 +1187,92 @@ public class Script
 		return str;
 	}
 	
-	public RunnableCommand parse(String line)
+	public static File getScriptFile(String unraw)
+	{
+		File scr = new File(SCRIPT_PATH + StringUtils.endWith(StringUtils.startWithout(unraw, HIDDEN_SCRIPT), SCRIPT_EXT));
+		if (!scr.exists())
+		{
+			scr = new File(SCRIPT_PATH + StringUtils.endWith(StringUtils.startWith(unraw, HIDDEN_SCRIPT), SCRIPT_EXT));
+			if (!scr.exists())
+				return null;
+		}
+		return scr;
+	}
+	
+	private boolean breakIf = true;
+	private RunnableCommand parse(String line, CmdHead head)
 	{
 		String[] argStrs = argsOf(line);
 		if (line.length() > 0)
 		{
-			String first = firstToken(line);
-			String[] storing = first.split(STORE);
-			String name = storing[0];
-			Command cmd = CMDS.get(name);
+			Command cmd = getCommand(head);
 			if (cmd != null)
 			{
-				CmdArg<?>[] args = cmd.args;
-				boolean varArgs = cmd.isVarArgs();
-				boolean varArgArray = argStrs.length > 0 && argStrs[argStrs.length - 1].startsWith(VAR_ARG_STR);
-				if (varArgArray && !varArgs)
-					parseExcept("Var-Arg array cannot be specified for non-var-arg commands", line, argStrs[argStrs.length]);
-				if (argStrs.length != args.length && !(varArgs && argStrs.length >= args.length - 1 && !varArgArray))
-					parseExcept("Invalid argument count", line, name + " requires " + args.length + " args, but " + argStrs.length + " have been provided. Args are separated by commas.");
-				
-				Object[] objs = new Object[args.length];
-				if (varArgs)
-					objs[objs.length - 1] = Array.newInstance(args[args.length - 1].cls, argStrs.length - args.length + 1);
-				
-				String input = "";
-				for (int argInd = 0; argInd < argStrs.length; argInd++)
+				boolean inlIfVal = head.isInlineIf ? valParse(CmdArg.BOOLEAN, new String[] { head.inlineIf }, line) : true;
+				breakIf = breakIf && head.isInlineElse;
+				if (!breakIf && inlIfVal)
 				{
-					CmdArg<?> arg = args[Math.min(argInd, args.length - 1)];
-					boolean atVA = varArgs && argInd >= args.length - 1;
-					boolean firstVarArg = varArgs && argInd == args.length - 1;
+					breakIf = true;
+					CmdArg<?>[] args = cmd.args;
+					boolean varArgs = cmd.isVarArgs();
+					boolean varArgArray = argStrs.length > 0 && argStrs[argStrs.length - 1].startsWith(VAR_ARG_STR);
+					if (varArgArray && !varArgs)
+						parseExcept("Var-Arg array cannot be specified for non-var-arg commands", line, argStrs[argStrs.length]);
+					if (argStrs.length != args.length && !(varArgs && argStrs.length >= args.length - 1 && !varArgArray))
+						parseExcept("Invalid argument count", line, name + " requires " + args.length + " args, but " + argStrs.length + " have been provided. Args are separated by commas.");
 					
-					String[] tokens = tokensOf(argStrs[argInd]);
+					Object[] objs = new Object[args.length];
+					if (varArgs)
+						objs[objs.length - 1] = Array.newInstance(args[args.length - 1].cls, argStrs.length - args.length + 1);
 					
-					if (varArgArray && !firstVarArg)
-						parseExcept("Invalid argument count", line, "If var-arg arguments are specified as an array, the array must be the last argument");
-					
-					String trimmed = "";
-					Object obj;
-					if (!varArgArray)
+					String input = "";
+					for (int argInd = 0; argInd < argStrs.length; argInd++)
 					{
-						int count = arg.tokenCount();
-						if (tokens.length != count)
-							parseExcept("Invalid token count", line, "Argument " + (argInd + 1) + " requires " + count + " tokens, but " + tokens.length + " have been provided. Tokens are separated by spaces.");
-					
-						for (int tokInArg = 0; tokInArg < count; tokInArg++)
-							trimmed += varParse(cmd, Math.min(argInd, args.length - 1), tokInArg, tokens[tokInArg]) + " ";
+						CmdArg<?> arg = args[Math.min(argInd, args.length - 1)];
+						boolean atVA = varArgs && argInd >= args.length - 1;
+						boolean firstVarArg = varArgs && argInd == args.length - 1;
 						
-						trimmed = trimmed.trim();
-						obj = arg.parse(trimmed);
-						if (obj == null)
-							parseExcept("Invalid token resolution", trimmed);
+						String[] tokens = tokensOf(argStrs[argInd]);
 						
-						if (!atVA)
-							objs[argInd] = obj;
+						if (varArgArray && !firstVarArg)
+							parseExcept("Invalid argument count", line, "If var-arg arguments are specified as an array, the array must be the last argument");
+						
+						String trimmed = "";
+						Object obj;
+						if (!varArgArray)
+						{
+							int count = arg.tokenCount();
+							if (tokens.length != count)
+								parseExcept("Invalid token count", line, "Argument " + (argInd + 1) + " requires " + count + " tokens, but " + tokens.length + " have been provided. Tokens are separated by spaces.");
+						
+							for (int tokInArg = 0; tokInArg < count; tokInArg++)
+								trimmed += varParse(cmd, Math.min(argInd, args.length - 1), tokInArg, tokens[tokInArg]) + " ";
+							
+							trimmed = trimmed.trim();
+							obj = arg.parse(trimmed);
+							if (obj == null)
+								parseExcept("Invalid token resolution", trimmed, "Expected type: " + arg.type);
+							
+							if (!atVA)
+								objs[argInd] = obj;
+							else
+								((Object[]) objs[objs.length - 1])[argInd - args.length + 1] = obj;
+						}
 						else
-							((Object[]) objs[objs.length - 1])[argInd - args.length + 1] = obj;
+						{
+							trimmed = varParse(cmd, args.length - 1, 0, tokens[0]);
+							obj = CmdArg.arrayOf(arg).parse(trimmed);
+							if (obj == null)
+								parseExcept("Invalid var-arg array resolution", trimmed, tokens[0]);
+							
+							objs[objs.length - 1] = obj;
+						}
+						input += trimmed + (argInd == argStrs.length - 1 ? "" : ", ");
 					}
-					else
-					{
-						trimmed = varParse(cmd, args.length - 1, 0, tokens[0]);
-						obj = CmdArg.arrayOf(arg).parse(trimmed);
-						if (obj == null)
-							parseExcept("Invalid var-arg array resolution", trimmed, tokens[0]);
-						
-						objs[objs.length - 1] = obj;
-					}
-					input += trimmed + (argInd == argStrs.length - 1 ? "" : ", ");
+	
+					RunnableCommand run = new RunnableCommand(cmd, input, objs);
+					return run;
 				}
-
-				RunnableCommand run = new RunnableCommand(cmd, input, objs);
-				return run;
 			}
 			else
 				parseExcept("Unknown command", name);
@@ -1169,9 +1313,16 @@ public class Script
 		while (scan.hasNextLine())
 		{
 			String line = scan.nextLine();
-			if (line.startsWith(LABEL))
+			if (line.startsWith(LABEL) || line.startsWith(SCOPED_LABEL))
 			{
 				putLabel(firstToken(line), num);
+			}
+			else if (line.startsWith(END_SCRIPT))
+				break;
+			else if (line.trim().endsWith(END_SCRIPT))
+			{
+				str += StringUtils.endWithout(line, END_SCRIPT);
+				break;
 			}
 			
 			str += line + "\n";
@@ -1196,12 +1347,12 @@ public class Script
 	{
 		forceKill.set(true);
 	}
-	public void run()
+	public void run(VarSet... varSets)
 	{
 		try
 		{
 			keyIn = new Scanner(System.in);
-			runFrom(-1);
+			runFrom(GLOBAL, varSets);
 			keyIn.close();
 		}
 		catch (CommandParseException e)
@@ -1214,20 +1365,19 @@ public class Script
 			this.exceptionCallback.accept(e);
 		}
 	}
-	public void subRunFrom(int start)
+	public void subRunFrom(Label start, VarSet... varSets)
 	{
-		runFrom(start, false);
+		runFrom(start, false, varSets);
 	}
-	private void runFrom(int start)
+	private void runFrom(Label start, VarSet... varSets)
 	{
-		runFrom(start, true);
+		runFrom(start, true, varSets);
 	}
-	private void runFrom(int start, boolean returns)
+	private void runFrom(Label label, boolean returns, VarSet... varSets)
 	{
-		if (start != -1)
-			pushStack(start, returns);
-		else
-			pushStack(0, returns);
+		pushStack(label, returns);
+		for (VarSet var : varSets)
+			putVar(var.var, var.set.raw);
 		if (keyIn == null)
 			keyIn = new Scanner(System.in);
 		
@@ -1235,33 +1385,58 @@ public class Script
 		{
 			String line = lines[parseLine];
 		//	System.out.print("Parsing: " + line);
-			if (line.startsWith(COMMENT) || line.isEmpty() || line.startsWith(LABEL))
+			if (line.startsWith(COMMENT) || line.isEmpty() || line.startsWith(LABEL) || line.startsWith(SCOPED_LABEL))
 			{
 				parseLine++;
 				continue;
 			}
 			String first = firstToken(line);
-			String[] storing = first.split(STORE);
-			RunnableCommand cmd = parse(line);
-			String out;
-	//		System.out.println(" ... Done");
-			putVar(PREVIOUS, out = cmd.run(this));
-			for (int i = 1; i < storing.length; i++)
-				putVar(storing[i], out);
-			prevCallback.accept(storing[0], out);
-			debugger.info(storing[0], cmd.getInput(), out);
-			if (!popped.isEmpty() && !popped.pop().returns)
-				break;
+			CmdHead head = new CmdHead(first);
+			if (head.printHelp)
+			{
+				Command command = getCommand(head);
+				if (command == null)
+				{
+					ScriptObject<?> so = OBJECTS.get(head.name);
+					if (so == null)
+						parseExcept("Unrecognized command for help request", "Cannot display help text.");
+					else
+					{
+						String str = "";
+						Command[] cmds = so.getMemberCommands();
+						for (int i = 0; i < cmds.length; i++)
+							str += "    " + cmds[i].getInfoString() + "\n";
+						printCallback.accept("Type: " + so.getTypeName() + ", Desc: " + so.getDescription() + "\n  Cmds:\n" + str);
+					}
+				}
+				else
+					printCallback.accept(command.getInfoString());
+			}
+			else
+			{
+				RunnableCommand cmd = parse(line, head);
+				if (cmd != null)
+				{
+					String out;
+					putVar(PREVIOUS, out = cmd.run(this));
+					for (int i = 0; i < head.storing.length; i++)
+						putVar(head.storing[i], out);
+					prevCallback.accept(head.name, out);
+					debugger.info(head.name, cmd.getInput(), out);
+					if (!popped.isEmpty() && !popped.pop().returns)
+						break;
+				}
+			}
 			parseLine++;
 		}
 	}
 	public void goTo(String label)
 	{
-		int line = getLabelLine(label);
-		if (line == NO_LABEL)
+		Label lab = getLabel(label);
+		if (lab == null)
 			parseExcept("Invalid label specification", label, "No label found.");
 		
-		pushStack(line, true);
+		pushStack(lab, true);
 	}
 	
 	public boolean putVarType(String name, String val, CmdArg<?> type, String prompt)
@@ -1278,6 +1453,20 @@ public class Script
 		}
 	}
 	
+	public static Command getCommand(CmdHead head)
+	{
+		if (!head.isMemberCmd)
+			return CMDS.get(head.name);
+		ScriptObject<?> parent = OBJECTS.get(head.parentPath[0]);
+		for (int i = 1; i < head.parentPath.length - 1; i++)
+		{
+			parent = parent.getSub(head.parentPath[i]);
+			if (parent == null)
+				return null;
+		}
+		return parent.getMemberCmd(head.name);
+	}
+	
 	public void putVar(String name, String val)
 	{
 		if (name.contains("" + ARR_S) || name.contains("" + ARR_E) || name.contains("" + STRING_CHAR) || name.contains("" + ESCAPE_CHAR))
@@ -1289,22 +1478,18 @@ public class Script
 		}
 		catch (NumberFormatException e)
 		{}
-		vars.put(name, val);
+		scope.put(name, val);
 	}
 	
 	public void integrateVarsFrom(Script other)
 	{
-		other.vars.forEach((var, val) ->
-		{
-			if (!var.equals(PARENT))
-				vars.put(var, val);
-		});
+		scope.integrateFrom(other.scope);
 	}
 	
 	public String getVar(String name)
 	{
 		String trm = getTrim(name);
-		String got = vars.get(trm);
+		String got = scope.get(trm);
 		boolean ref = got != null && got.startsWith("" + REF);
 		if (ref)
 			return getVar(got.substring(1));
@@ -1349,28 +1534,32 @@ public class Script
 	
 	public void putLabel(String label, int line)
 	{
-		labels.put(label.replaceFirst(quote(LABEL), ""), line);
-	}
-	public int getLabelLine(String label)
-	{
-		Integer line = labels.get(label.replaceFirst(quote(LABEL), ""));
-		if (line == null)
-			return NO_LABEL;
-		return line;
+		boolean ns = label.startsWith(SCOPED_LABEL);
+		label = label.replaceFirst(LABEL_REG, "");
+		labels.put(label, new Label(label, line, ns));
 	}
 	
-	private void pushStack(int to, boolean returns)
+	public Label getLabel(String label)
+	{
+		return labels.get(label.replaceFirst(LABEL_REG, ""));
+	}
+	
+	private void pushStack(Label to, boolean returns)
 	{
 		stack.push(new StackEntry(parseLine, to, returns));
-		parseLine = to;
+		parseLine = to.line;
+		if (to.isScoped)
+			scope.push(to);
 	}
 	
-	private void popStack()
+	private SNode popStack()
 	{
 		StackEntry ent = stack.pop();
 		popped.push(ent);
 		parseLine = ent.from;
-		return;
+		if (ent.to.isScoped)
+			return scope.pop();
+		return scope.getLast();
 	}
 	
 	///////////////////////

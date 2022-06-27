@@ -2,6 +2,7 @@ package commands;
 
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.concurrent.atomic.AtomicBoolean;
 import commands.Script.CommandParseException;
 
@@ -16,6 +17,7 @@ public class ScriptObject<T>
 	
 	private CmdArg<T> cmdArg;
 	private final HashSet<ScriptObject<? extends T>> subs = new HashSet<>();
+	private final HashMap<String, Command> memberCmds = new HashMap<>();
 	
 	////////////////////////////
 	
@@ -115,6 +117,14 @@ public class ScriptObject<T>
 	
 	///////////////////////////
 	
+	public Command add(String name, String ret, String desc, CmdArg<?>... args)
+	{
+		Command cmd = new Command(name, ret, desc, args);
+		if (memberCmds.put(name, cmd) != null)
+			throw new IllegalArgumentException("Cannot register two commands to the same name in the same type: " + typeName + Script.MEMBER_ACCESS + name);
+		return cmd;
+	}
+	
 	public ScriptObject<T> setConstructor(SOConstruct<T> construct)
 	{
 		this.constructor = construct;
@@ -124,6 +134,11 @@ public class ScriptObject<T>
 	public String getDescription()
 	{
 		return description;
+	}
+	
+	public Command[] getMemberCommands()
+	{
+		return memberCmds.values().toArray(new Command[memberCmds.size()]);
 	}
 	
 	public String getTypeName()
@@ -144,6 +159,24 @@ public class ScriptObject<T>
 	public CmdArg<T> argOf()
 	{
 		return cmdArg;
+	}
+	
+	public <SUB extends T> ScriptObject<SUB> getSub(String subtype)
+	{
+		Iterator<ScriptObject<? extends T>> it = subs.iterator();
+		while (it.hasNext())
+		{
+			@SuppressWarnings("unchecked")
+			ScriptObject<SUB> n = (ScriptObject<SUB>) it.next();
+			if (n.typeName.equals(subtype))
+				return n;
+		}
+		return null;
+	}
+	
+	public Command getMemberCmd(String name)
+	{
+		return memberCmds.get(name);
 	}
 	
 	///////////////////////

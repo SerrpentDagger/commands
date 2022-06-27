@@ -83,6 +83,11 @@ public class Command
 		return str;
 	}
 	
+	public String getInfoString()
+	{
+		return "Name: " + this.getName() + ", Args: " + this.getArgInfo() + ", Return: " + this.getReturn() + ", Desc: " + this.getDescription();
+	}
+	
 	public static class RunnableCommand
 	{
 		private final Object[] objs;

@@ -58,7 +58,7 @@ public abstract class CmdArg<T>
 		@Override
 		public Command parse(String trimmed)
 		{
-			return Script.get(trimmed);
+			return Script.getCommand(new CmdHead(trimmed));
 		}
 	};
 	
