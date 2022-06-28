@@ -1,6 +1,8 @@
 package commands;
 
 import java.awt.AWTException;
+import java.awt.MouseInfo;
+import java.awt.Point;
 import java.awt.Robot;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseEvent;
@@ -31,14 +33,22 @@ public class Script
 {
 	private static final LinkedHashMap<String, Command> CMDS = new LinkedHashMap<String, Command>();
 	private static final HashMap<String, ScriptObject<?>> OBJECTS = new HashMap<String, ScriptObject<?>>();
+	
 	public static final String COMMENT = "//";
 	public static final char COMMENT_CHAR = '/';
+	
 	public static final String LABEL = "--", SCOPED_LABEL = "~~";
 	public static final String LABEL_REG = LABEL + "|" + SCOPED_LABEL;
+	public static final String LABEL_ACC_FOR_DOWN = "|", LABEL_ACC_TO_UP = "^";
+	public static final String[] VALID_LABEL_MODS = new String[] { LABEL_ACC_FOR_DOWN, LABEL_ACC_TO_UP };
+	public static final String LABEL_MODS_REG = "[" + quote(LABEL_ACC_FOR_DOWN) + quote(LABEL_ACC_TO_UP) + "]+";
+	public static final Pattern LABEL_MODS_PATTERN = Pattern.compile(LABEL_MODS_REG);
+	
 	public static final String PREVIOUS = "PREV";
 	public static final String PARENT = "PARENT";
 	public static final String NULL = "null";
 	public static final String FALSE = "false", TRUE = "true";
+	
 	public static final String STORE = "->";
 	public static final String INLINE_IF = "?";
 	public static final String INLINE_ELSE = ":";
@@ -54,10 +64,11 @@ public class Script
 	public static final String HELP_CHAR_STR = "" + HELP_CHAR;
 	public static final String INDEX = "INDEX";
 	public static final int NO_LABEL = -2;
-	public static final Label GLOBAL = new Label("GLOBAL", 0, false);
+	public static final Label GLOBAL = new Label("GLOBAL", 0, false, true, false);
 	public static final char UNRAW = '%', RAW = '$', REF = '@';
 	
-//	public static final Pattern ILLEGAL_VAR_CHARS = Pattern.compile("[]".formatted('\\' + HELP_CHAR));
+	public static final String ILLEGAL_VAR_REG_EX = "[^\\w\\-]";
+	public static final Pattern ILLEGAL_VAR_MATCHER = Pattern.compile(ILLEGAL_VAR_REG_EX);
 	
 	public static final String BOOL = "boolean", VOID = "void", TOKEN = "token", TOKEN_ARR = ARR_S + TOKEN + ARR_E, STRING = "String", INT = "int", DOUBLE = "double", VALUE = "Value", OBJECT = "Object";
 	
@@ -95,7 +106,8 @@ public class Script
 	{
 		for (String var : vars)
 		{
-			String in = keyIn.next().trim();
+			String in = keyIn.next();
+			in = in.trim();
 			if (!ctx.putVarType(var, in, type, prompt))
 				return false;
 		}
@@ -108,6 +120,13 @@ public class Script
 		if (CMDS.put(name, cmd) != null)
 			throw new IllegalArgumentException("Cannot register two commands to the same name: " + name);
 		return cmd;
+	}
+	public static Command overload(String name, Command other, String differ, ArgTransform transform, CmdArg<?>... args)
+	{
+		return add(name, other.getReturn(), "Overload of " + other.getName() + ": " + other.getDescription() + " - " + differ, args).setFunc((ctx, objs) ->
+		{
+			return other.func.cmd(ctx, transform.transform(objs));
+		});
 	}
 	
 	public static <SO> ScriptObject<SO> add(String type, String desc, Class<SO> cl, CmdArg<?>... constArgs)
@@ -614,6 +633,10 @@ public class Script
 		}
 		return out;
 	}).setVarArgs();
+	public static final Command RUNSCR = overload("runscr", RUN_SCRIPT, "Push and pull are assumed false.", (objs) ->
+	{
+		return new Object[] { objs[0], false, false, objs[1] };
+	}, CmdArg.STRING, CmdArg.VAR_SET).setVarArgs();
 	public static final Command RUN_SCRIPT_LABEL = add("run_script_label", Script.VOID, "Runs the given script from the given label. Booleans are the same as those of 'run_script'.", CmdArg.STRING, CmdArg.STRING, CmdArg.BOOLEAN, CmdArg.BOOLEAN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
 	{
 		CmdString name = (CmdString) objs[0];
@@ -651,6 +674,10 @@ public class Script
 		}
 		return out;
 	}).setVarArgs();
+	public static final Command RUNLAB = overload("runlab", RUN_SCRIPT_LABEL, "Push and pull are assumed false.", (objs) ->
+	{
+		return new Object[] { objs[0], objs[1], false, false, objs[2] };
+	}, CmdArg.STRING, CmdArg.STRING, CmdArg.VAR_SET).setVarArgs();
 	public static final Command EXIT = add("exit", VOID, "Exits the script runtime.").setFunc((ctx, objs) ->
 	{
 		ctx.forceKill.set(true);
@@ -668,7 +695,13 @@ public class Script
 		}
 		return ctx.prev();
 	});
-
+	
+	public static final Command GET_MOUSE_POS = add("get_mouse_pos", arrayReturnDispl(INT), "Gets and returns the position of the mouse pointer.").setFunc((ctx, objs) ->
+	{
+		Point p = MouseInfo.getPointerInfo().getLocation();
+		return toArrayString(new String[] { "" + p.x, "" + p.y });
+	});
+	
 	public static final Command MOUSE_MOVE = add("mouse_move", VOID, "Move mouse to the X, Y supplied.", CmdArg.INT, CmdArg.INT).setFunc((ctx, objs) ->
 	{
 		ctx.rob.mouseMove((int) objs[0], (int) objs[1]);
@@ -805,6 +838,11 @@ public class Script
 	public static interface Debugger
 	{
 		public void info(String command, String args, String retrn);
+	}
+	@FunctionalInterface
+	public static interface ArgTransform
+	{
+		public Object[] transform(Object[] args);
 	}
 	
 	///////////////
@@ -1042,6 +1080,11 @@ public class Script
 		for (int i = 0; i < elements.length; i++)
 			out += elements[i] + (i == elements.length - 1 ? "" : ARR_SEP + " ");
 		return out + ARR_E;
+	}
+	
+	public static String arrayReturnDispl(String of)
+	{
+		return ARR_S + of + ARR_E;
 	}
 	
 	///////////
@@ -1384,7 +1427,6 @@ public class Script
 		while(parseLine < lines.length && !stack.isEmpty() && !forceKill.get())
 		{
 			String line = lines[parseLine];
-		//	System.out.print("Parsing: " + line);
 			if (line.startsWith(COMMENT) || line.isEmpty() || line.startsWith(LABEL) || line.startsWith(SCOPED_LABEL))
 			{
 				parseLine++;
@@ -1469,7 +1511,8 @@ public class Script
 	
 	public void putVar(String name, String val)
 	{
-		if (name.contains("" + ARR_S) || name.contains("" + ARR_E) || name.contains("" + STRING_CHAR) || name.contains("" + ESCAPE_CHAR))
+//		if (name.contains("" + ARR_S) || name.contains("" + ARR_E) || name.contains("" + STRING_CHAR) || name.contains("" + ESCAPE_CHAR))
+		if (ILLEGAL_VAR_MATCHER.matcher(name).find())
 			parseExcept("Illegal characters in variable name", name);
 		try
 		{
@@ -1532,11 +1575,29 @@ public class Script
 			return str;
 	}
 	
+	public static boolean[] prefixModsFrom(String test, String[] valid)
+	{
+		boolean[] out = new boolean[valid.length];
+		int startsWith = -1;
+		while ((startsWith = startsWithOneOf(test, valid)) != -1)
+		{
+			out[startsWith] = true;
+			test = test.replaceFirst(quote(valid[startsWith]), "");
+		}
+		return out;
+	}
+	private static int startsWithOneOf(String test, String[] valid)
+	{
+		for (int i = 0; i < valid.length; i++)
+			if (test.startsWith(valid[i]))
+				return i;
+		return -1;
+	}
+	
 	public void putLabel(String label, int line)
 	{
-		boolean ns = label.startsWith(SCOPED_LABEL);
-		label = label.replaceFirst(LABEL_REG, "");
-		labels.put(label, new Label(label, line, ns));
+		Label lab = new Label(label, line);
+		labels.put(lab.name, lab);
 	}
 	
 	public Label getLabel(String label)

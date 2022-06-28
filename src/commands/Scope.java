@@ -11,12 +11,16 @@ public class Scope
 	private SNode last = null;
 	private final SNode global;
 	
+	///////////////////////
+	
 	public Scope()
 	{
 		stack.add(new SNode(null, Script.GLOBAL));
 		last = stack.get(0);
 		global = last;
 	}
+	
+	///////////////////////
 	
 	public void forEach(ScopeConsumer sc)
 	{
@@ -89,6 +93,8 @@ public class Scope
 		return global;
 	}
 	
+	/////////////////////////////////////////////
+	
 	protected class SNode
 	{
 		private final HashMap<String, String> vars = new HashMap<>();
@@ -103,12 +109,24 @@ public class Scope
 		
 		protected void put(String name, String val)
 		{
-			if (vars.containsKey(name))
-				vars.put(name, val);
-			else if (global.vars.containsKey(name))
-				global.vars.put(name, val);
-			else
-				vars.put(name, val);
+			SNode sn = this, old = this;
+			boolean contains = false, couldAccessOld = true;
+			while (!contains && sn != null)
+			{
+				contains = (sn == this || sn.label.isAccessible || (couldAccessOld && old.label.getsAccess)) && sn.vars.containsKey(name);
+				if (!contains)
+				{
+					old = sn;
+					couldAccessOld = couldAccessOld || old.label.isAccessible;
+					sn = sn.parent;
+				}
+				else
+				{
+					sn.vars.put(name, val);
+					return;
+				}
+			}
+			vars.put(name, val);
 		}
 		
 		protected String get(String name)
@@ -119,6 +137,8 @@ public class Scope
 			return out;
 		}
 	}
+	
+	////////////////////////////////////////////
 	
 	public static interface ScopeConsumer
 	{
