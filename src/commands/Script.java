@@ -106,6 +106,7 @@ public class Script
 	{
 		for (String var : vars)
 		{
+			printCallback.accept(var + "?: ");
 			String in = keyIn.next();
 			in = in.trim();
 			if (!ctx.putVarType(var, in, type, prompt))
@@ -381,6 +382,11 @@ public class Script
 		ctx.printCallback.accept("----------------");
 		return ctx.prev();
 	});
+	public static final Command PRINT_COMMANDS = add("print_all_cmds", VOID, "Prints all commands and their info.").setFunc((ctx, objs) ->
+	{
+		CMDS.values().forEach((cmd) -> ctx.printCallback.accept(cmd.getInfoString()));
+		return ctx.prev();
+	});
 	public static final Command PRINT_DEBUG = add("print_debug", VOID, "Sets whether or not debug information should be printed for every line execution.", CmdArg.BOOLEAN).setFunc((ctx, objs) ->
 	{
 		Boolean bool = (Boolean) objs[0];
@@ -521,7 +527,7 @@ public class Script
 				return b.then;
 		return NULL;
 	}).setVarArgs();
-	public static final Command FOR = add("for", VOID, "Excecutes the given token label the given number of times.", CmdArg.INT, CmdArg.TOKEN).setFunc((ctx, objs) ->
+	public static final Command FOR = add("for", VOID, "Excecutes the given token label the given number of times.", CmdArg.INT, CmdArg.TOKEN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
 	{
 		int count = (int) objs[0];
 		String label = (String) objs[1];
@@ -531,24 +537,26 @@ public class Script
 		for (int i = 0; i < count; i++)
 		{
 			ctx.putVar(INDEX, "" + i);
-			ctx.subRunFrom(lab);
+			ctx.subRunFrom(lab, (VarSet[]) objs[2]);
 		}
 		return ctx.prev();
-	});
-	public static final Command WHILE = add("while", VOID, "While the boolean is true, excecutes the token label.", CmdArg.BOOLEAN, CmdArg.TOKEN).setFunc((ctx, objs) ->
+	}).setVarArgs();
+	public static final Command WHILE = add("while", VOID, "While the boolean token (0) is true, excecutes the token label (1). Sets variables as provided before each run (2...).", CmdArg.TOKEN, CmdArg.TOKEN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
 	{
-		boolean bool = (boolean) objs[0];
+		String[] bool = new String[] { (String) objs[0] };
 		int wL = ctx.parseLine;
 		Label lab = ctx.getLabel((String) objs[1]);
 		if (lab == null)
 			ctx.parseExcept("Invalid label specification", (String) objs[1], "No label found.");
-		if (bool)
+		int ind = 0;
+		while (ctx.valParse(CmdArg.BOOLEAN, bool, ctx.lines[wL]))
 		{
-			ctx.subRunFrom(lab);
-			ctx.parseLine = wL - 1;
+			ctx.putVar(INDEX, "" + ind);
+			ind++;
+			ctx.subRunFrom(lab, (VarSet[]) objs[2]);
 		}
 		return ctx.prev();
-	});
+	}).rawArg(0).setVarArgs();
 	public static final Command GOTO = add("goto", VOID, "Excecutes the given token label in a new stack entry. Sets variables to values provided.", CmdArg.TOKEN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
 	{
 		String label = (String) objs[0];
@@ -564,7 +572,7 @@ public class Script
 		
 		return ctx.prev();
 	}).setVarArgs();
-	public static final Command SKIPTO = add("skipto", VOID, "Skips excecution to the given token label, without modifying the stack.", CmdArg.TOKEN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
+	public static final Command SKIPTO = add("skipto", VOID, "Skips excecution to the given token label, without modifying the stack or scope.", CmdArg.TOKEN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
 	{
 		String label = (String) objs[0];
 		if (label.equals(NULL))
@@ -827,7 +835,7 @@ public class Script
 				return TRUE;
 			else
 				return FALSE;
-		}).setVarArgs();
+		}).setVarArgs().rawArg(0);
 	}
 	@FunctionalInterface
 	public static interface UserReqType
@@ -1368,11 +1376,10 @@ public class Script
 				break;
 			}
 			
-			str += line + "\n";
+			str += line.trim() + "\n";
 			num++;
 		}
 		lines = str.split("\n");
-		scan.close();
 		putVar(PARENT, NULL);
 	}
 	
@@ -1396,7 +1403,6 @@ public class Script
 		{
 			keyIn = new Scanner(System.in);
 			runFrom(GLOBAL, varSets);
-			keyIn.close();
 		}
 		catch (CommandParseException e)
 		{
@@ -1432,6 +1438,12 @@ public class Script
 				parseLine++;
 				continue;
 			}
+			else if (line.trim().equals(HELP_CHAR_STR))
+			{
+				PRINT_COMMANDS.func.cmd(this, (Object[]) null);
+				parseLine++;
+				continue;
+			}
 			String first = firstToken(line);
 			CmdHead head = new CmdHead(first);
 			if (head.printHelp)
@@ -1441,7 +1453,7 @@ public class Script
 				{
 					ScriptObject<?> so = OBJECTS.get(head.name);
 					if (so == null)
-						parseExcept("Unrecognized command for help request", "Cannot display help text.");
+						parseExcept("Unrecognized command for help request", "Cannot display help text");
 					else
 					{
 						String str = "";
@@ -1726,6 +1738,7 @@ public class Script
 		to.setPrevCallback(getPrevCallback());
 		to.setForceKill(forceKill);
 		to.setUserReqestType(getUserReqType());
+		to.keyIn = keyIn;
 	}
 	
 	public Script setParent(Script parent)
