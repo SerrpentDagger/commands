@@ -3,7 +3,10 @@ package commands;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.Map.Entry;
 import java.util.concurrent.atomic.AtomicBoolean;
+
 import commands.Script.CommandParseException;
 
 public class ScriptObject<T>
@@ -14,10 +17,11 @@ public class ScriptObject<T>
 	private final CmdArg<?>[] constArgs;
 	private String description;
 	private SOConstruct<T> constructor;
+	private int unparseID = 0;
 	
 	private CmdArg<T> cmdArg;
 	private final HashSet<ScriptObject<? extends T>> subs = new HashSet<>();
-	private final HashMap<String, Command> memberCmds = new HashMap<>();
+	private final LinkedHashMap<String, Command> memberCmds = new LinkedHashMap<>();
 	
 	////////////////////////////
 	
@@ -45,7 +49,23 @@ public class ScriptObject<T>
 				}
 				return old;
 			}
-		};
+			
+			@Override
+			public String unparse(T obj)
+			{
+				if (obj == null)
+					return Script.NULL;
+				if (objs.containsValue(obj))
+				{
+					for (Entry<String, T> ent : objs.entrySet())
+						if (obj.equals(ent.getValue()))
+								return ent.getKey();
+				}
+				String name = typeName + unparseID++;
+				objs.put(name, obj);
+				return name;
+			};
+		}.reg();
 	}
 	
 	public void construct(Script ctx, String name, Object[] params)
@@ -141,6 +161,11 @@ public class ScriptObject<T>
 		return memberCmds.values().toArray(new Command[memberCmds.size()]);
 	}
 	
+	public LinkedHashMap<String, Command> getMemberCommandMap()
+	{
+		return memberCmds;
+	}
+	
 	public String getTypeName()
 	{
 		return typeName;
@@ -149,6 +174,11 @@ public class ScriptObject<T>
 	public String getCommandName()
 	{
 		return typeName.toLowerCase();
+	}
+	
+	public String getInfoString()
+	{
+		return this.getTypeName() + " | Desc: " + this.getDescription();
 	}
 	
 	public CmdArg<?>[] getConstArgs()

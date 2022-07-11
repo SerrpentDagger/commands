@@ -6,12 +6,13 @@ import utilities.StringUtils;
 
 public class CmdHead
 {
-	public final String inlineIf, name;
+	public final String inlineIf, name, input;
 	public final String[] storing, parentPath;
 	public final boolean isInlineIf, isInlineElse, printHelp, isMemberCmd;
 	
 	public CmdHead(String firstToken)
 	{
+		input = firstToken;
 		firstToken = StringUtils.endWithout(firstToken, Script.END_SCRIPT);
 		isInlineElse = firstToken.startsWith(Script.INLINE_ELSE);
 		if (isInlineElse)

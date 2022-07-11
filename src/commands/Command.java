@@ -2,7 +2,7 @@ package commands;
 
 public class Command
 {
-	private boolean isVarArgs = false;
+	private boolean isVarArgs = false, isDisabled = false;
 	boolean[] rawArg;
 	String name;
 	String ret;
@@ -34,6 +34,17 @@ public class Command
 	public boolean isVarArgs()
 	{
 		return isVarArgs;
+	}
+	
+	public Command setDisabled(boolean disabled)
+	{
+		isDisabled = disabled;
+		return this;
+	}
+	
+	public boolean isDisabled()
+	{
+		return isDisabled;
 	}
 	
 	public Command rawArg(int... indices)
@@ -85,7 +96,7 @@ public class Command
 	
 	public String getInfoString()
 	{
-		return "Name: " + this.getName() + ", Args: " + this.getArgInfo() + ", Return: " + this.getReturn() + ", Desc: " + this.getDescription();
+		return this.getName() + " | Args: " + this.getArgInfo() + ", Return: " + this.getReturn() + ", Desc: " + this.getDescription();
 	}
 	
 	public static class RunnableCommand

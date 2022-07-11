@@ -10,6 +10,9 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.lang.reflect.Array;
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -22,17 +25,21 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 import java.util.regex.Pattern;
 
 import arrays.AUtils;
+import commands.CmdArg.TypeArg;
 import commands.Command.RunnableCommand;
 import commands.Scope.SNode;
+import utilities.ArrayUtils;
 import utilities.StringUtils;
 
 public class Script
 {
 	private static final LinkedHashMap<String, Command> CMDS = new LinkedHashMap<String, Command>();
 	private static final HashMap<String, ScriptObject<?>> OBJECTS = new HashMap<String, ScriptObject<?>>();
+	private static final HashMap<String, Library> LIBS = new HashMap<>();
 	
 	public static final String COMMENT = "//";
 	public static final char COMMENT_CHAR = '/';
@@ -130,6 +137,98 @@ public class Script
 		});
 	}
 	
+	public static Command expose(Method m) { return expose(m, null); }
+	public static Command expose(Method m, ScriptObject<?> to)
+	{
+		String originalName = m.getName();
+		String name = originalName;
+		int n = 2;
+		HashMap<String, Command> map = to == null ? CMDS : to.getMemberCommandMap();
+		while (map.containsKey(name))
+			name = originalName + n++;
+		
+		Class<?> retType = m.getReturnType();
+		if (retType.isPrimitive())
+			retType = CmdArg.wrap(retType);
+		TypeArg<?> retTypeArg = CmdArg.getTypeArgFor(retType);
+		String ret = retType.getSimpleName();
+		boolean isVoid = retType.equals(Void.TYPE);
+		Class<?>[] types = m.getParameterTypes();
+		for (int i = 0; i < types.length; i++)
+			if (types[i].isPrimitive())
+				types[i] = CmdArg.wrap(types[i]);
+		boolean isInst = !Modifier.isStatic(m.getModifiers());
+		if (isInst)
+			types = AUtils.extendPre(types, 1, (i) -> m.getDeclaringClass());
+		boolean varArgs = m.isVarArgs();
+		if (varArgs)
+			types[types.length - 1] = types[types.length - 1].getComponentType();
+		
+		String params = StringUtils.toString(types, (cl) -> cl.getSimpleName(), "(", ", ", "");
+		if (varArgs)
+			params += "...";
+		params += ")";
+		String displayName = m.getDeclaringClass().getCanonicalName() + "." + originalName + params;
+		
+		CmdArg<?>[] args = new CmdArg<?>[types.length];
+		for (int i = 0; i < types.length; i++)
+		{
+			args[i] = CmdArg.getArgFor(types[i]);
+			if (args[i] == null)
+				throw new IllegalStateException("Unable to automatically expose method '" + displayName + "' due to lack of registered"
+						+ " CmdArg for class: " + types[i].getCanonicalName());
+		}
+		if (retTypeArg.arg == null)
+			throw new IllegalStateException("Unable to automatically expose method '" + displayName + "' due to lack of registered"
+					+ " CmdArg for return type of class: " + retType.getCanonicalName());
+		
+		String desc = "Direct exposition of method: " + displayName;
+		
+		Command cmd = to == null ? add(name, ret, desc, args) : to.add(name, ret, desc, args);
+		if (varArgs)
+			cmd.setVarArgs();
+		cmd.setFunc((ctx, objs) ->
+		{
+			Object out = null;
+			try
+			{
+				if (isInst)
+					out = m.invoke(objs[0], ArrayUtils.remove(objs, objs[0]));
+				else
+					out = m.invoke(null, objs);
+			}
+			catch (IllegalAccessException | InvocationTargetException e)
+			{
+				ctx.parseExcept("Exception occurred during invocation of auto-exposed method '" + displayName + "'", "Exception follows in log.");
+				e.printStackTrace();
+			}
+			if (isVoid)
+				return ctx.prev();
+			if (out == null)
+				return NULL;
+			return retTypeArg.castAndUnparse(out);
+		});
+		
+		return cmd;
+	}
+	private static String getSortingName(Method m)
+	{
+		return m.getDeclaringClass().getCanonicalName() + "." + m.getName() +
+				StringUtils.toString(m.getParameterTypes(), (cl) -> cl.getCanonicalName(), "(", ", ", ")"
+				+ " " + m.getReturnType().getCanonicalName());
+	}
+	
+	public static Command[] exposeAll(Method[] methods, ScriptObject<?> to, Predicate<Method> iff)
+	{
+		Arrays.sort(methods, (a, b) -> String.CASE_INSENSITIVE_ORDER.compare(getSortingName(a), getSortingName(b)));
+		
+		ArrayList<Command> out = new ArrayList<>();
+		for (Method m : methods)
+			if (iff.test(m))
+				out.add(expose(m, to));
+		return out.toArray(new Command[out.size()]);
+	}
+	
 	public static <SO> ScriptObject<SO> add(String type, String desc, Class<SO> cl, CmdArg<?>... constArgs)
 	{
 		ScriptObject<SO> so = new ScriptObject<SO>(type, desc, cl, constArgs);
@@ -148,6 +247,34 @@ public class Script
 		return so;
 	}
 	
+	public static Library add(String name, Runnable load)
+	{
+		Library lib = new Library(name, load);
+		LIBS.put(name, lib);
+		return lib;
+	}
+	
+	public static boolean canAutoExpose(Method m)
+	{
+		boolean good = true;
+		Class<?> ret = m.getReturnType();
+		good = CmdArg.getArgFor(ret) != null;
+		Class<?>[] params = m.getParameterTypes();
+		for (int i = 0; good && i < params.length; i++)
+			good = CmdArg.getArgFor(params[i]) != null;
+		return good;
+	}
+	
+	public static ScriptObject<?>[] getAllTypes()
+	{
+		return OBJECTS.values().toArray(new ScriptObject<?>[OBJECTS.size()]);
+	}
+	
+	public static ScriptObject<?> getType(String name)
+	{
+		return OBJECTS.get(name);
+	}
+	
 	public static Command[] getAllCommands()
 	{
 		return CMDS.values().toArray(new Command[CMDS.size()]);
@@ -156,6 +283,11 @@ public class Script
 	public static String[] getAllCmds()
 	{
 		return CMDS.keySet().toArray(new String[CMDS.size()]);
+	}
+	
+	public static Library getLibrary(String name)
+	{
+		return LIBS.get(name);
 	}
 	
 	public static CmdArg<?>[][] getAllCmdArgs()
@@ -334,15 +466,9 @@ public class Script
 		
 		return "" + (OBJECTS.get(type).objs.remove((String) objs[1]) != null);
 	});
-	public static final Command OBJ_STRING = add("obj_string", STRING, "Returns the string representation of the object of the given type.", CmdArg.TYPE, CmdArg.SCRIPT_OBJECT).setFunc((ctx, objs) ->
+	public static final Command OBJ_STRING = add("obj_string", STRING, "Returns the string representation of the object of the given type.", CmdArg.OBJECT).setFunc((ctx, objs) ->
 	{
-		String type = (String) objs[0];
-		String key = (String) objs[1];
-		Object obj = OBJECTS.get(type).getObject(key);
-		if (obj == null)
-			return NULL;
-		
-		return obj.toString();
+		return objs[0].toString();
 	});
 	public static final Command GET_PARENT = add("get_parent", STRING, "Returns the name of the parent script # levels up, where 0 would target this script.", CmdArg.INT).setFunc((ctx, objs) ->
 	{
@@ -355,6 +481,20 @@ public class Script
 				return NULL;
 		}
 		return p.name == null ? NULL : p.name;
+	});
+	public static final Command IMPORT = add("import", VOID, "Loads the given library by name.", CmdArg.LIBRARY).setFunc((ctx, objs) ->
+	{
+		for (Library lib : (Library[]) objs[0])
+			lib.load();
+		return ctx.prev();
+	}).setVarArgs();
+	public static final Command IS_LOADED = add("is_loaded", BOOL, "Returns true if all given libraries are loaded.", CmdArg.LIBRARY).setFunc((ctx, objs) ->
+	{
+		boolean bool = true;
+		for (Object obj : objs)
+			if (!(bool = ((Library) obj).isLoaded()))
+				break;
+		return "" + bool;
 	});
 	public static final Command PRINT = add("print", STRING, "Prints and returns the supplied value.", CmdArg.STRING).setFunc((ctx, objs) ->
 	{
@@ -384,7 +524,12 @@ public class Script
 	});
 	public static final Command PRINT_COMMANDS = add("print_all_cmds", VOID, "Prints all commands and their info.").setFunc((ctx, objs) ->
 	{
-		CMDS.values().forEach((cmd) -> ctx.printCallback.accept(cmd.getInfoString()));
+		ctx.printCallback.accept("--- Commands ---");
+		CMDS.values().forEach((cmd) -> ctx.printCallback.accept("   " + cmd.getInfoString()));
+		ctx.printCallback.accept("--- Types ---");
+		OBJECTS.values().forEach((obj) -> ctx.printCallback.accept("   " + obj.getInfoString()));
+		ctx.printCallback.accept("--- Libraries ---");
+		LIBS.values().forEach((lib) -> ctx.printCallback.accept("   " + lib.getInfoString()));
 		return ctx.prev();
 	});
 	public static final Command PRINT_DEBUG = add("print_debug", VOID, "Sets whether or not debug information should be printed for every line execution.", CmdArg.BOOLEAN).setFunc((ctx, objs) ->
@@ -567,7 +712,7 @@ public class Script
 		if (lab == null)
 			ctx.parseExcept("Invalid label specification", label, "No label found.");
 		
-		ctx.subRunFrom(lab, (VarSet[]) objs[1]);
+		ctx.runFrom(lab, (VarSet[]) objs[1]);
 		// ctx.pushStack(line, true);
 		
 		return ctx.prev();
@@ -595,11 +740,9 @@ public class Script
 	public static final Command RETURN = add("return", VOID, "Marks the end of a label or code section. If present, will set PREV to argument, or array of arguments if more than one is provided.", CmdArg.TOKEN).setFunc((ctx, objs) ->
 	{
 		String[] rets = (String[]) objs[0];
+		SNode last = ctx.popStack();
 		if (rets.length == 0)
-		{
-			SNode last = ctx.popStack();
 			return last.get(PREVIOUS);
-		}
 		else if (rets.length == 1)
 			return rets[0];
 		else
@@ -1090,6 +1233,16 @@ public class Script
 		return out + ARR_E;
 	}
 	
+	public static String tokenize(String... objs)
+	{
+		return StringUtils.toString(objs, "", " ", "");
+	}
+	
+	public static String tokenize(double... nums)
+	{
+		return StringUtils.toString(nums, "", " ", "");
+	}
+	
 	public static String arrayReturnDispl(String of)
 	{
 		return ARR_S + of + ARR_E;
@@ -1259,6 +1412,8 @@ public class Script
 			Command cmd = getCommand(head);
 			if (cmd != null)
 			{
+				if (cmd.isDisabled())
+					parseExcept("Disabled command", cmd.name);
 				boolean inlIfVal = head.isInlineIf ? valParse(CmdArg.BOOLEAN, new String[] { head.inlineIf }, line) : true;
 				breakIf = breakIf && head.isInlineElse;
 				if (!breakIf && inlIfVal)
@@ -1270,7 +1425,7 @@ public class Script
 					if (varArgArray && !varArgs)
 						parseExcept("Var-Arg array cannot be specified for non-var-arg commands", line, argStrs[argStrs.length]);
 					if (argStrs.length != args.length && !(varArgs && argStrs.length >= args.length - 1 && !varArgArray))
-						parseExcept("Invalid argument count", line, name + " requires " + args.length + " args, but " + argStrs.length + " have been provided. Args are separated by commas.");
+						parseExcept("Invalid argument count", line, head.name + " requires " + args.length + " args, but " + argStrs.length + " have been provided. Args are separated by commas.");
 					
 					Object[] objs = new Object[args.length];
 					if (varArgs)
@@ -1279,7 +1434,6 @@ public class Script
 					String input = "";
 					for (int argInd = 0; argInd < argStrs.length; argInd++)
 					{
-						CmdArg<?> arg = args[Math.min(argInd, args.length - 1)];
 						boolean atVA = varArgs && argInd >= args.length - 1;
 						boolean firstVarArg = varArgs && argInd == args.length - 1;
 						
@@ -1288,8 +1442,17 @@ public class Script
 						if (varArgArray && !firstVarArg)
 							parseExcept("Invalid argument count", line, "If var-arg arguments are specified as an array, the array must be the last argument");
 						
+						CmdArg<?> arg = args[Math.min(argInd, args.length - 1)];
+						//HashSet<CmdArg<?>> bin = ARGS.getBin(arg.cls);
+						//Iterator<CmdArg<?>> binIt = bin == null ? null : bin.iterator();
+						
+						Object obj = null;
+						
+					/*	do
+						{
+							
+						} while (obj == null && binIt != null && binIt.hasNext());*/
 						String trimmed = "";
-						Object obj;
 						if (!varArgArray)
 						{
 							int count = arg.tokenCount();
@@ -1326,7 +1489,7 @@ public class Script
 				}
 			}
 			else
-				parseExcept("Unknown command", name);
+				parseExcept("Unknown command", head.name);
 		}
 		return null;
 	}
@@ -1606,7 +1769,7 @@ public class Script
 		return -1;
 	}
 	
-	public void putLabel(String label, int line)
+	private void putLabel(String label, int line)
 	{
 		Label lab = new Label(label, line);
 		labels.put(lab.name, lab);

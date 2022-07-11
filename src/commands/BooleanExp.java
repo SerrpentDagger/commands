@@ -2,8 +2,8 @@ package commands;
 
 public class BooleanExp
 {
-	private final double a, b;
-	private final Comp comp;
+	public final double a, b;
+	public final Comp comp;
 	
 	public BooleanExp(double a, double b, Comp comp)
 	{
@@ -19,18 +19,20 @@ public class BooleanExp
 	
 	public static enum Comp
 	{
-		EQUAL((a, b) -> a == b),
-		NOT_EQUAL((a, b) -> a != b),
-		LESS((a, b) -> a < b),
-		LESS_EQ((a, b) -> a <= b),
-		MORE((a, b) -> a > b),
-		MORE_EQ((a, b) -> a >= b);
+		EQUAL("==", (a, b) -> a == b),
+		NOT_EQUAL("!=", (a, b) -> a != b),
+		LESS("<", (a, b) -> a < b),
+		LESS_EQ("<=", (a, b) -> a <= b),
+		MORE(">", (a, b) -> a > b),
+		MORE_EQ(">=", (a, b) -> a >= b);
 		
 		////////////
 		
-		private Bool bool;
-		Comp(Bool bool)
+		public final Bool bool;
+		public final String display;
+		Comp(String display, Bool bool)
 		{
+			this.display = display;
 			this.bool = bool;
 		}
 		
