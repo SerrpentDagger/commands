@@ -100,26 +100,6 @@ public class ScriptObject<T>
 	
 	//////////
 	
-/*	@SafeVarargs
-	public static <SO> CmdArg<SO> supOf(String type, Class<SO> cl, ScriptObject<? extends SO>... exts)
-	{
-		return new CmdArg<SO>(type, cl)
-		{
-			@Override
-			public SO parse(String trimmed)
-			{
-				SO obj;
-				for (ScriptObject<? extends SO> ext : exts)
-				{
-					obj = ext.cmdArg.parse(trimmed);
-					if (obj != null)
-						return obj;
-				}
-				return null;
-			}
-		};
-	} */
-	
 	public static <SO> ScriptObject<SO> supOf(String type, String description, Class<SO> cl, ScriptObject<? extends SO>[] subs, CmdArg<?>... constArgs)
 	{
 		ScriptObject<SO> sup = new ScriptObject<SO>(type, description, cl, constArgs);

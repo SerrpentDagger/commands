@@ -94,8 +94,6 @@ public abstract class CmdArg<T>
 		this.cls = cls;
 		if (tokenCount() < 0)
 			throw new IllegalStateException("Only positive token counts can be parsed.");
-		if (type.split(" ").length != tokenCount())
-			throw new IllegalStateException("CmdArg type names should correspond with their token counts.");
 	}
 	
 	public boolean rawToken(int ind) { return false; }
@@ -188,6 +186,15 @@ public abstract class CmdArg<T>
 			ScriptObject<?> so = Script.getType(tokens[1]);
 			return so.getObject(tokens[0]);
 		}
+		
+		@Override
+		public String unparse(Object obj)
+		{
+			TypeArg<?> typeArg = getTypeArgFor(obj.getClass());
+			if (typeArg.arg == null || typeArg.arg == this)
+				return Script.NULL;
+			return typeArg.castAndUnparse(obj);
+		}
 	}.reg();
 
 	public static final CmdArg<Color> COLOR = new CmdArg<Color>("Red Green Blue", Color.class)
@@ -218,6 +225,21 @@ public abstract class CmdArg<T>
 		};
 	}.reg();
 	
+	public static final CmdArg<Long> LONG = new CmdArg<Long>("Long", Long.class)
+	{
+		@Override
+		public Long parse(String trimmed)
+		{
+			try
+			{
+				return Long.parseLong(trimmed);
+			}
+			catch (NumberFormatException e)
+			{}
+			return null;
+		}
+	}.reg();
+	
 	public static final CmdArg<Integer> INT = new CmdArg<Integer>("Integer", Integer.class)
 	{
 		@Override
@@ -230,6 +252,26 @@ public abstract class CmdArg<T>
 			catch (NumberFormatException e)
 			{}
 			return null;
+		}
+	}.reg();
+	
+	public static final CmdArg<Byte> BYTE = new CmdArg<Byte>("Byte", Byte.class)
+	{
+		@Override
+		public Byte parse(String trimmed)
+		{
+			Integer i = INT.parse(trimmed);
+			return i == null ? null : (byte) (int) i;
+		}
+	}.reg();
+	
+	public static final CmdArg<Short> SHORT = new CmdArg<Short>("Short", Short.class)
+	{
+		@Override
+		public Short parse(String trimmed)
+		{
+			Integer i = INT.parse(trimmed);
+			return i == null ? null : (short) (int) i;
 		}
 	}.reg();
 	
@@ -260,6 +302,28 @@ public abstract class CmdArg<T>
 		}
 	}.reg();
 	
+	public static final CmdArg<Float> FLOAT = new CmdArg<Float>("Float", Float.class)
+	{	
+		@Override
+		public Float parse(String trimmed)
+		{
+			Double d = DOUBLE.parse(trimmed);
+			return d == null ? null : (float) (double) d;
+		}
+	}.reg();
+	
+	public static final CmdArg<Character> CHARACTER = new CmdArg<Character>("Character", Character.class)
+	{
+		@Override
+		public Character parse(String trimmed)
+		{
+			CmdString str = new CmdString(trimmed);
+			if (str.unraw.length() > 1)
+				return null;
+			return str.unraw.charAt(0);
+		}
+	}.reg();
+	
 	public static final CmdArg<String> TOKEN = new CmdArg<String>("Token", String.class)
 	{
 		@Override
@@ -267,7 +331,7 @@ public abstract class CmdArg<T>
 		{
 			return trimmed;
 		}
-	}.reg();
+	};
 	
 	public static final CmdArg<String> TYPE = new CmdArg<String>("Type", String.class)
 	{
@@ -279,7 +343,7 @@ public abstract class CmdArg<T>
 				return type;
 			return null;
 		}
-	}.reg();
+	};
 	
 	public static final CmdArg<String> SCRIPT_OBJECT = new CmdArg<String>("Object", String.class)
 	{
@@ -288,7 +352,7 @@ public abstract class CmdArg<T>
 		{
 			return TOKEN.parse(trimmed);
 		}
-	}.reg();
+	};
 	
 	public static final CmdArg<CmdString> STRING = new CmdArg<CmdString>("String", CmdString.class)
 	{
@@ -303,6 +367,21 @@ public abstract class CmdArg<T>
 		{
 			return obj.raw;
 		};
+	}.reg();
+	
+	public static final CmdArg<String> EXPOSED_STRING = new CmdArg<String>("String", String.class)
+	{
+		@Override
+		public String parse(String trimmed)
+		{
+			return STRING.parse(trimmed).unraw;
+		}
+		
+		@Override
+		public String unparse(String obj)
+		{
+			return obj;
+		}
 	}.reg();
 	
 	public static final CmdArg<Boolean> BOOLEAN = new CmdArg<Boolean>("Boolean", Boolean.class)
@@ -557,8 +636,12 @@ public abstract class CmdArg<T>
 	}.reg();
 	
 	public static final CmdArg<int[]> INT_ARR = arrayOfPrimitives(int[].class);
+	public static final CmdArg<short[]> SHORT_ARR = arrayOfPrimitives(short[].class);
+	public static final CmdArg<byte[]> BYTE_ARR = arrayOfPrimitives(byte[].class);
 	public static final CmdArg<double[]> DOUB_ARR = arrayOfPrimitives(double[].class);
+	public static final CmdArg<float[]> FLOAT_ARR = arrayOfPrimitives(float[].class);
 	public static final CmdArg<boolean[]> BOOL_ARR = arrayOfPrimitives(boolean[].class);
+	public static final CmdArg<char[]> CHAR_ARR = arrayOfPrimitives(char[].class);
 	
 	////////////////////////////////////////
 	

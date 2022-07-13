@@ -9,8 +9,11 @@ import java.awt.event.MouseEvent;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.lang.reflect.Array;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Executable;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Member;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.ArrayDeque;
@@ -18,6 +21,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Scanner;
 import java.util.Set;
@@ -25,7 +29,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
-import java.util.function.Predicate;
 import java.util.regex.Pattern;
 
 import arrays.AUtils;
@@ -137,30 +140,144 @@ public class Script
 		});
 	}
 	
-	public static Command expose(Method m) { return expose(m, null); }
-	public static Command expose(Method m, ScriptObject<?> to)
+	private static String uniqueName(String desired, Map<String, ?> from)
 	{
-		String originalName = m.getName();
-		String name = originalName;
-		int n = 2;
-		HashMap<String, Command> map = to == null ? CMDS : to.getMemberCommandMap();
-		while (map.containsKey(name))
-			name = originalName + n++;
+		String actual = desired;
+		int i = 2;
+		while (from.containsKey(actual))
+			actual = desired + i++;
+		return actual;
+	}
+	private static String upperFirstChar(String toUpper)
+	{
+		return Character.toUpperCase(toUpper.charAt(0)) + toUpper.substring(1);
+	}
+	private static <T> CmdArg<T> getArgFor(Class<T> cl, ExpPredicate filter, boolean recursive)
+	{
+		CmdArg<T> out = CmdArg.getArgFor(cl);
+		if (out == null && recursive)
+			return expose(cl, filter, recursive).argOf();
+		return out;
+	}
+	private static <T> TypeArg<T> getTypeArgFor(Class<T> cl, ExpPredicate filter, boolean recursive)
+	{
+		TypeArg<T> out = CmdArg.getTypeArgFor(cl);
+		if (out.arg == null && recursive)
+		{
+			expose(cl, filter, recursive);
+			return CmdArg.getTypeArgFor(cl);
+		}
+		return out;
+	}
+	
+	private static Command[] expose(Member m, ScriptObject<?> to, ExpPredicate filter, boolean recursive)
+	{
+		if (m instanceof Executable)
+			return new Command[] { expose((Executable) m, to, filter, recursive) };
+		else
+			return exposeGetterSetterFor((Field) m, to, filter, recursive);
+	}
+	private static Command[] exposeGetterSetterFor(Field f, ScriptObject<?> to, ExpPredicate filter, boolean recursive)
+	{
+		String fieldName = f.getName();
+		String displayName = f.getDeclaringClass().getCanonicalName() + "." + fieldName;
 		
-		Class<?> retType = m.getReturnType();
-		if (retType.isPrimitive())
-			retType = CmdArg.wrap(retType);
-		TypeArg<?> retTypeArg = CmdArg.getTypeArgFor(retType);
-		String ret = retType.getSimpleName();
-		boolean isVoid = retType.equals(Void.TYPE);
-		Class<?>[] types = m.getParameterTypes();
+		int mods = f.getModifiers();
+		boolean makeSetter = !Modifier.isFinal(mods);
+		boolean isInst = !Modifier.isStatic(mods);
+		
+		Command[] out = new Command[2];
+		
+		HashMap<String, Command> map = to == null ? CMDS : to.getMemberCommandMap();
+		String gName = uniqueName("get" + upperFirstChar(fieldName), map);
+		String sName = uniqueName("set" + upperFirstChar(fieldName), map);
+		
+		Class<?> type = f.getType();
+		TypeArg<?> typeArg = getTypeArgFor(type, filter, recursive);
+		Class<?> declType = f.getDeclaringClass();
+		CmdArg<?> declArg = getArgFor(declType, filter, recursive);
+		
+		if (typeArg.arg == null)
+			throw new IllegalStateException("Unable to automatically expose field '" + displayName + "' due to lack of registered"
+					+ " CmdArg for class: " + type.getCanonicalName());
+		if (isInst && declArg == null)
+			throw new IllegalStateException("Unable to automatically expose instance field '" + displayName + "' due to lack of registered"
+					+ " CmdArg for declaring class: " + declType.getCanonicalName());
+
+		String typeString = typeArg.arg.type;
+		
+		String gDesc = "Getter for the field '" + displayName + "'";
+		String sDesc = "Setter for the field '" + displayName + "'";
+		
+		CmdArg<?>[] sArgs = new CmdArg<?>[] { typeArg.arg };
+		CmdArg<?>[] gArgs = new CmdArg<?>[] {};
+		if (isInst)
+		{
+			sArgs = AUtils.extendPre(sArgs, 1, (i) -> declArg);
+			gArgs = AUtils.extendPre(gArgs, 1, (i) -> declArg);
+		}
+		
+		out[0] = to == null ? add(gName, typeString, gDesc, gArgs) : to.add(gName, typeString, gDesc, gArgs); // Getter
+		out[0].setFunc((ctx, objs) ->
+		{
+			Object ret = null;
+			
+			try
+			{
+				ret = f.get(isInst ? objs[0] : null);
+			}
+			catch (IllegalArgumentException | IllegalAccessException err)
+			{
+				ctx.parseExcept("Exception occurred during invocation of auto-exposed getter for field '" + displayName + "'", "Exception follows in log.");
+				err.printStackTrace();
+			}
+			
+			if (ret == null)
+				return NULL;
+			return typeArg.castAndUnparse(ret);
+		});
+		if (makeSetter)
+		{
+			out[1] = to == null ? add(sName, VOID, sDesc, sArgs) : to.add(sName, VOID, sDesc, sArgs);
+			out[1].setFunc((ctx, objs) ->
+			{
+				try
+				{
+					if (isInst)
+						f.set(objs[0], objs[1]);
+					else
+						f.set(null, objs[0]);
+				}
+				catch (IllegalArgumentException | IllegalAccessException err)
+				{
+					ctx.parseExcept("Exception occurred during invocation of auto-exposed setter for field '" + displayName + "'", "Exception follows in log.");
+					err.printStackTrace();
+				}
+				return ctx.prev();
+			});
+		}
+		
+		return out;
+	}
+	
+	public static Command expose(Executable e) { return expose(e, null, SAFE_EXPOSE_FILTER, false); }
+	private static Command expose(Executable e, ScriptObject<?> to, ExpPredicate filter, boolean recursive)
+	{
+		boolean isM = e instanceof Method;
+		final Method m = isM ? (Method) e : null;
+		final Constructor<?> c = isM ? null : (Constructor<?>) e;
+		
+		HashMap<String, Command> map = to == null ? CMDS : to.getMemberCommandMap();
+		String name = uniqueName(isM ? e.getName() : "new", map);
+
+		Class<?>[] types = e.getParameterTypes();
 		for (int i = 0; i < types.length; i++)
 			if (types[i].isPrimitive())
 				types[i] = CmdArg.wrap(types[i]);
-		boolean isInst = !Modifier.isStatic(m.getModifiers());
+		boolean isInst = isM && !Modifier.isStatic(e.getModifiers());
 		if (isInst)
-			types = AUtils.extendPre(types, 1, (i) -> m.getDeclaringClass());
-		boolean varArgs = m.isVarArgs();
+			types = AUtils.extendPre(types, 1, (i) -> e.getDeclaringClass());
+		boolean varArgs = e.isVarArgs();
 		if (varArgs)
 			types[types.length - 1] = types[types.length - 1].getComponentType();
 		
@@ -168,19 +285,28 @@ public class Script
 		if (varArgs)
 			params += "...";
 		params += ")";
-		String displayName = m.getDeclaringClass().getCanonicalName() + "." + originalName + params;
+		String displayName = e.getDeclaringClass().getCanonicalName() + "." + e.getName() + params;
 		
 		CmdArg<?>[] args = new CmdArg<?>[types.length];
 		for (int i = 0; i < types.length; i++)
 		{
-			args[i] = CmdArg.getArgFor(types[i]);
+			args[i] = getArgFor(types[i], filter, recursive);
 			if (args[i] == null)
 				throw new IllegalStateException("Unable to automatically expose method '" + displayName + "' due to lack of registered"
 						+ " CmdArg for class: " + types[i].getCanonicalName());
 		}
+		
+		Class<?> retType = isM ? m.getReturnType() : c.getDeclaringClass();
+		if (retType.isPrimitive())
+			retType = CmdArg.wrap(retType);
+		TypeArg<?> retTypeArg = getTypeArgFor(retType, filter, recursive);
+		boolean isVoid = retType.equals(Void.TYPE);
+		
 		if (retTypeArg.arg == null)
 			throw new IllegalStateException("Unable to automatically expose method '" + displayName + "' due to lack of registered"
 					+ " CmdArg for return type of class: " + retType.getCanonicalName());
+		
+		String ret = retTypeArg.arg.type;
 		
 		String desc = "Direct exposition of method: " + displayName;
 		
@@ -192,15 +318,23 @@ public class Script
 			Object out = null;
 			try
 			{
-				if (isInst)
-					out = m.invoke(objs[0], ArrayUtils.remove(objs, objs[0]));
+				if (isM)
+					if (isInst)
+					{
+						Object[] objs2 = new Object[objs.length - 1];
+						for (int i = 1; i < objs.length; i++)
+							objs2[i - 1] = objs[i];
+						out = m.invoke(objs[0], objs2);
+					}
+					else
+						out = m.invoke(null, objs);
 				else
-					out = m.invoke(null, objs);
+					out = c.newInstance(objs);
 			}
-			catch (IllegalAccessException | InvocationTargetException e)
+			catch (IllegalAccessException | InvocationTargetException | InstantiationException | IllegalArgumentException err)
 			{
-				ctx.parseExcept("Exception occurred during invocation of auto-exposed method '" + displayName + "'", "Exception follows in log.");
-				e.printStackTrace();
+				ctx.parseExcept("Exception occurred during invocation of auto-exposed executable '" + displayName + "'", "Exception follows in log.");
+				err.printStackTrace();
 			}
 			if (isVoid)
 				return ctx.prev();
@@ -211,22 +345,72 @@ public class Script
 		
 		return cmd;
 	}
-	private static String getSortingName(Method m)
+	private static String getSortingName(Member m)
 	{
-		return m.getDeclaringClass().getCanonicalName() + "." + m.getName() +
-				StringUtils.toString(m.getParameterTypes(), (cl) -> cl.getCanonicalName(), "(", ", ", ")"
-				+ " " + m.getReturnType().getCanonicalName());
+		if (m instanceof Executable)
+		{
+			Executable e = (Executable) m;
+			return e.getDeclaringClass().getCanonicalName() + "." + e.getName() +
+					StringUtils.toString(e.getParameterTypes(), (cl) -> cl.getCanonicalName(), "(", ", ", ")"
+					+ " " + getReturnType(e).getCanonicalName());
+		}
+		else
+		{
+			Field f = (Field) m;
+			return f.getDeclaringClass().getCanonicalName() + "." + f.getName();
+		}
 	}
 	
-	public static Command[] exposeAll(Method[] methods, ScriptObject<?> to, Predicate<Method> iff)
+	public static final ExpPredicate SAFE_EXPOSE_FILTER = (ex, rec) ->
 	{
-		Arrays.sort(methods, (a, b) -> String.CASE_INSENSITIVE_ORDER.compare(getSortingName(a), getSortingName(b)));
-		
+		int mods = ex.getModifiers();
+		return !Modifier.isPrivate(mods)
+				&& !Modifier.isProtected(mods)
+				&& !ex.isSynthetic()
+				&& Script.canAutoExpose(ex, rec);
+	};
+	public static Command[] exposeAll(Member[] members, ScriptObject<?> to, ExpPredicate iff)
+	{
+		return exposeAll(members, to, iff, false);
+	}
+	public static Command[] exposeAll(Member[] members, ScriptObject<?> to, ExpPredicate iff, boolean recursive)
+	{
+		Arrays.sort(members, (a, b) -> String.CASE_INSENSITIVE_ORDER.compare(getSortingName(a), getSortingName(b)));
 		ArrayList<Command> out = new ArrayList<>();
-		for (Method m : methods)
-			if (iff.test(m))
-				out.add(expose(m, to));
+		for (Member m : members)
+			if (iff.test(m, recursive))
+				out.addAll(Arrays.asList(expose(m, to, iff, recursive)));
 		return out.toArray(new Command[out.size()]);
+	}
+	public static <T> ScriptObject<T> expose(Class<T> cl, boolean recursive)
+	{
+		return expose(cl, SAFE_EXPOSE_FILTER, recursive);
+	}
+	@SuppressWarnings("unchecked")
+	public static <T> ScriptObject<T> expose(Class<T> cl, ExpPredicate memberIf, boolean recursive)
+	{
+		String desired = cl.getSimpleName();
+		String name = desired;
+		int i = 2;
+		while (OBJECTS.containsKey(name))
+		{
+			ScriptObject<?> test = OBJECTS.get(name);
+			if (test.argOf().cls.equals(cl))
+				return (ScriptObject<T>) test;
+			name = desired + i++;
+		}
+		
+		String desc = "Direct exposition of class: " + cl.getCanonicalName();
+		
+		ScriptObject<T> so = new ScriptObject<>(name, desc, cl);
+		Script.add(so);
+		so.argOf().reg();
+		
+		Script.exposeAll(cl.getConstructors(), so, memberIf, recursive);
+		Script.exposeAll(cl.getMethods(), so, memberIf, recursive);
+		Script.exposeAll(cl.getFields(), so, memberIf, recursive);
+
+		return so;
 	}
 	
 	public static <SO> ScriptObject<SO> add(String type, String desc, Class<SO> cl, CmdArg<?>... constArgs)
@@ -254,15 +438,23 @@ public class Script
 		return lib;
 	}
 	
-	public static boolean canAutoExpose(Method m)
+	public static boolean canAutoExpose(Member m, boolean recursive)
 	{
 		boolean good = true;
-		Class<?> ret = m.getReturnType();
-		good = CmdArg.getArgFor(ret) != null;
-		Class<?>[] params = m.getParameterTypes();
-		for (int i = 0; good && i < params.length; i++)
-			good = CmdArg.getArgFor(params[i]) != null;
+		if (m instanceof Executable)
+		{
+			Executable e = (Executable) m;
+			Class<?> ret = getReturnType(e);
+			good = CmdArg.getArgFor(ret) != null;
+			Class<?>[] params = e.getParameterTypes();
+			for (int i = 0; good && i < params.length; i++)
+				good = CmdArg.getArgFor(params[i]) != null || (recursive && params[i].getConstructors().length > 0);
+		}
 		return good;
+	}
+	private static Class<?> getReturnType(Executable e)
+	{
+		return (e instanceof Method) ? ((Method) e).getReturnType() : ((Constructor<?>) e).getDeclaringClass();
 	}
 	
 	public static ScriptObject<?>[] getAllTypes()
@@ -996,6 +1188,12 @@ public class Script
 		public Object[] transform(Object[] args);
 	}
 	
+	@FunctionalInterface
+	public static interface ExpPredicate
+	{
+		public boolean test(Member e, boolean recursive);
+	}
+	
 	///////////////
 	
 	public static <O> Command newObjOf(ScriptObject<O> scriptObj)
@@ -1675,6 +1873,8 @@ public class Script
 		if (!head.isMemberCmd)
 			return CMDS.get(head.name);
 		ScriptObject<?> parent = OBJECTS.get(head.parentPath[0]);
+		if (parent == null)
+			return null;
 		for (int i = 1; i < head.parentPath.length - 1; i++)
 		{
 			parent = parent.getSub(head.parentPath[i]);
