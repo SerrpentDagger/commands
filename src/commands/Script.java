@@ -20,6 +20,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -35,7 +36,7 @@ import arrays.AUtils;
 import commands.CmdArg.TypeArg;
 import commands.Command.RunnableCommand;
 import commands.Scope.SNode;
-import utilities.ArrayUtils;
+import commands.libs.BuiltInLibs;
 import utilities.StringUtils;
 
 public class Script
@@ -61,7 +62,7 @@ public class Script
 	
 	public static final String STORE = "->";
 	public static final String INLINE_IF = "?";
-	public static final String INLINE_ELSE = ":";
+	public static final String INLINE_SEP = ":";
 	public static final String MEMBER_ACCESS = ".";
 	public static final char ARR_S = '[', ARR_E = ']', ARR_ACCESS = '.', ARR_SEP = ';';
 	public static final String ARR_LEN = "len";
@@ -413,13 +414,11 @@ public class Script
 		return so;
 	}
 	
-	public static <SO> ScriptObject<SO> add(String type, String desc, Class<SO> cl, CmdArg<?>... constArgs)
+	public static <SO> ScriptObject<SO> add(String type, String desc, Class<SO> cl)
 	{
-		ScriptObject<SO> so = new ScriptObject<SO>(type, desc, cl, constArgs);
+		ScriptObject<SO> so = new ScriptObject<SO>(type, desc, cl);
 		if (OBJECTS.put(type, so) != null)
 			throw new IllegalArgumentException("Cannot register two ScriptObject types of the same name: " + type);
-		
-		newObjOf(so);
 		
 		return so;
 	}
@@ -650,14 +649,43 @@ public class Script
 		
 		return "" + OBJECTS.get(type).isObject((String) objs[1]);
 	});
-	public static final Command DESTROY = add("dest_obj", BOOL, "Destroys the Object of the given Type. Returns true if object existed.", CmdArg.TYPE, CmdArg.SCRIPT_OBJECT).setFunc((ctx, objs) ->
+	public static final Command DESTROY = add("dest_obj", BOOL, "Returns true and destroys the given Objects only if all the Objects existed.", CmdArg.SCRIPT_OBJECT).setFunc((ctx, objs) ->
 	{
-		String type = (String) objs[0];
-		if (!OBJECTS.containsKey(type))
-			ctx.parseExcept("Unrecognized type", type);
+		ObjectType<?>[] objType = (ObjectType<?>[]) objs[0];
+		if (objType == null)
+			return FALSE;
 		
-		return "" + (OBJECTS.get(type).objs.remove((String) objs[1]) != null);
+		for (ObjectType<?> obj : objType)
+			obj.destroy();
+		return TRUE;
+	}).setVarArgs().nullable(0);
+	public static final Command DESTROY_ALL = add("dest_all", INT, "Removes all Objects stored under any Type with the given key, and returns the number of Types in which the key was present.", CmdArg.TOKEN).setFunc((ctx, objs) ->
+	{
+		AtomicInteger i = new AtomicInteger(0);
+		OBJECTS.forEach((typeName, type) ->
+		{
+			if (type.objs.remove(objs[0]) != null)
+				i.incrementAndGet();
+		});
+		return "" + i.get();
 	});
+	public static final Command MERGE = add("merge_obj", TOKEN, "Merges the Objects to a single shared key that represents all of them. The old keys will no longer point to those Objects.", CmdArg.SCRIPT_OBJECT).setFunc((ctx, objs) ->
+	{
+		ObjectType<?>[] objTypes = (ObjectType<?>[]) objs[0];
+		if (objTypes.length == 0)
+			return NULL;
+		if (objTypes.length == 1)
+			return objTypes[0].key();
+		
+		String merged = "";
+		for (ObjectType<?> obj : objTypes)
+			if (!merged.contains(obj.key()))
+				merged += obj.key();
+		for (ObjectType<?> obj : objTypes)
+			obj.moveTo(merged);
+		
+		return merged;
+	}).setVarArgs();
 	public static final Command OBJ_STRING = add("obj_string", STRING, "Returns the string representation of the object of the given type.", CmdArg.OBJECT).setFunc((ctx, objs) ->
 	{
 		return objs[0].toString();
@@ -772,7 +800,7 @@ public class Script
 		}
 		return out + "\"";
 	}).setVarArgs();
-	public static final Command ARR_MERGE = add("array_merge", TOKEN_ARR, "Merges arrays one onto the other in the order provided.", CmdArg.arrayOf(CmdArg.STRING)).setFunc((ctx, objs) ->
+	public static final Command ARR_MERGE = add("merge_array", TOKEN_ARR, "Merges arrays one onto the other in the order provided.", CmdArg.arrayOf(CmdArg.STRING)).setFunc((ctx, objs) ->
 	{
 		String out = "" + ARR_S;
 		CmdString[][] arrays = (CmdString[][]) objs[0];
@@ -880,13 +908,12 @@ public class Script
 	}).setVarArgs();
 	public static final Command WHILE = add("while", VOID, "While the boolean token (0) is true, excecutes the token label (1). Sets variables as provided before each run (2...).", CmdArg.TOKEN, CmdArg.TOKEN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
 	{
-		String[] bool = new String[] { (String) objs[0] };
 		int wL = ctx.parseLine;
 		Label lab = ctx.getLabel((String) objs[1]);
 		if (lab == null)
 			ctx.parseExcept("Invalid label specification", (String) objs[1], "No label found.");
 		int ind = 0;
-		while (ctx.valParse(CmdArg.BOOLEAN, bool, ctx.lines[wL]))
+		while (ctx.valParse(CmdArg.BOOLEAN, ctx.lines[wL], (String) objs[0]))
 		{
 			ctx.putVar(INDEX, "" + ind);
 			ind++;
@@ -1104,6 +1131,11 @@ public class Script
 		return "" + ctx.rob.getAutoDelay();
 	});
 	
+	static
+	{
+		BuiltInLibs.load();
+	}
+	
 	private static Command mouseCommand(String name, String desc, KeyFunc m, CmdArg<?>... args)
 	{
 		return add(name, BOOL, desc, args).setFunc((ctx, objs) ->
@@ -1192,29 +1224,6 @@ public class Script
 	public static interface ExpPredicate
 	{
 		public boolean test(Member e, boolean recursive);
-	}
-	
-	///////////////
-	
-	public static <O> Command newObjOf(ScriptObject<O> scriptObj)
-	{
-		CmdArg<?>[] constArgs = scriptObj.getConstArgs();
-		CmdArg<?>[] args = new CmdArg<?>[constArgs.length + 1];
-		args[0] = CmdArg.TOKEN;
-		for (int i = 0; i < constArgs.length; i++)
-			args[i + 1] = constArgs[i];
-		String tn = scriptObj.getTypeName();
-		return scriptObj.add("new", tn, "Constructs a new " + tn + ": " + scriptObj.getDescription(), args).setFunc((ctx, objs) ->
-		{
-			String name = (String) objs[0];
-			Object[] constObjs = new Object[objs.length - 1];
-			for (int i = 1; i < objs.length; i++)
-				constObjs[i - 1] = objs[i];
-			
-			scriptObj.construct(ctx, name, constObjs);
-			
-			return name;
-		});
 	}
 	
 	/////////////////////////////////////////////
@@ -1459,7 +1468,7 @@ public class Script
 		return replaced + ARR_E;
 	}
 	
-	public <T> T valParse(CmdArg<T> arg, String[] tokens, String line)
+	public <T> T valParse(CmdArg<T> arg, String line, String... tokens)
 	{
 		int count = arg.tokenCount();
 		if (tokens.length != count)
@@ -1602,6 +1611,7 @@ public class Script
 	}
 	
 	private boolean breakIf = true;
+	private final ArrayDeque<String> bufferedPEs = new ArrayDeque<>();
 	private RunnableCommand parse(String line, CmdHead head)
 	{
 		String[] argStrs = argsOf(line);
@@ -1612,7 +1622,7 @@ public class Script
 			{
 				if (cmd.isDisabled())
 					parseExcept("Disabled command", cmd.name);
-				boolean inlIfVal = head.isInlineIf ? valParse(CmdArg.BOOLEAN, new String[] { head.inlineIf }, line) : true;
+				boolean inlIfVal = head.isInlineIf ? valParse(CmdArg.BOOLEAN, line, head.inlineIf) : true;
 				breakIf = breakIf && head.isInlineElse;
 				if (!breakIf && inlIfVal)
 				{
@@ -1641,45 +1651,67 @@ public class Script
 							parseExcept("Invalid argument count", line, "If var-arg arguments are specified as an array, the array must be the last argument");
 						
 						CmdArg<?> arg = args[Math.min(argInd, args.length - 1)];
-						//HashSet<CmdArg<?>> bin = ARGS.getBin(arg.cls);
-						//Iterator<CmdArg<?>> binIt = bin == null ? null : bin.iterator();
+						final CmdArg<?> origArg = arg;
+						boolean firstGo = true;
+						LinkedHashMap<String, CmdArg<?>> bin = CmdArg.ARGS.get(arg.cls);
+						Iterator<CmdArg<?>> binIt = bin == null ? null : bin.values().iterator();
 						
 						Object obj = null;
 						
-					/*	do
+						bufferedPEs.clear();
+						do
 						{
-							
-						} while (obj == null && binIt != null && binIt.hasNext());*/
-						String trimmed = "";
-						if (!varArgArray)
-						{
-							int count = arg.tokenCount();
-							if (tokens.length != count)
-								parseExcept("Invalid token count", line, "Argument " + (argInd + 1) + " requires " + count + " tokens, but " + tokens.length + " have been provided. Tokens are separated by spaces.");
-						
-							for (int tokInArg = 0; tokInArg < count; tokInArg++)
-								trimmed += varParse(cmd, Math.min(argInd, args.length - 1), tokInArg, tokens[tokInArg]) + " ";
-							
-							trimmed = trimmed.trim();
-							obj = arg.parse(trimmed);
-							if (obj == null)
-								parseExcept("Invalid token resolution", trimmed, "Expected type: " + arg.type);
-							
-							if (!atVA)
-								objs[argInd] = obj;
+							if (arg == origArg && !firstGo)
+								continue;
+							firstGo = false;
+							String trimmed = "";
+							if (!varArgArray)
+							{
+								int count = arg.tokenCount();
+								if (tokens.length != count)
+								{
+									bufferedPEs.push(getParseExceptString("Invalid token count for format '" + arg.type + "'", line, "Argument " + (argInd + 1) + " requires " + count + " tokens, but " + tokens.length + " have been provided. Tokens are separated by spaces."));
+									continue;
+								}
+								
+								for (int tokInArg = 0; tokInArg < count; tokInArg++)
+									trimmed += varParse(cmd, Math.min(argInd, args.length - 1), tokInArg, tokens[tokInArg]) + " ";
+								
+								trimmed = trimmed.trim();
+								obj = arg.parse(trimmed);
+								if (obj == null && !cmd.nullableArg(argInd))
+								{
+									bufferedPEs.push(getParseExceptString("Invalid token resolution", trimmed, "Expected type: " + arg.type));
+									continue;
+								}
+								
+								if (!atVA)
+									objs[argInd] = obj;
+								else
+									((Object[]) objs[objs.length - 1])[argInd - args.length + 1] = obj;
+							}
 							else
-								((Object[]) objs[objs.length - 1])[argInd - args.length + 1] = obj;
-						}
-						else
+							{
+								trimmed = varParse(cmd, args.length - 1, 0, tokens[0]);
+								obj = CmdArg.arrayOf(arg).parse(trimmed);
+								if (obj == null && !cmd.nullableArg(argInd))
+								{
+									bufferedPEs.push(getParseExceptString("Invalid var-arg array resolution", trimmed, tokens[0]));
+									continue;
+								}
+								
+								objs[objs.length - 1] = obj;
+							}
+							if (obj != null)
+								input += trimmed + (argInd == argStrs.length - 1 ? "" : ", ");
+						} while (obj == null && binIt != null && binIt.hasNext() && (arg = binIt.next()) != null);
+						if (obj == null && !cmd.nullableArg(argInd))
 						{
-							trimmed = varParse(cmd, args.length - 1, 0, tokens[0]);
-							obj = CmdArg.arrayOf(arg).parse(trimmed);
-							if (obj == null)
-								parseExcept("Invalid var-arg array resolution", trimmed, tokens[0]);
-							
-							objs[objs.length - 1] = obj;
+							String pe = "Invalid argument resolution for arg " + (argInd + 1) + ". Encountered the following problems for subsequent parse formats: ";
+							for (String str : bufferedPEs)
+								pe += "\n    " + str;
+							throw new CommandParseException(pe);
 						}
-						input += trimmed + (argInd == argStrs.length - 1 ? "" : ", ");
 					}
 	
 					RunnableCommand run = new RunnableCommand(cmd, input, objs);
@@ -1702,10 +1734,15 @@ public class Script
 		parseExcept(preAt, postLine, null);
 	}
 	
+	public String getParseExceptString(String preAt, String postLine, String extra)
+	{
+		return preAt + " at line " + (parseLine + 1) + ": " + postLine + ", from: " + lines[parseLine]
+				+ (extra == null ? "." : ", extra info: " + extra);
+	}
+	
 	public void parseExcept(String preAt, String postLine, String extra)
 	{
-		throw new CommandParseException(preAt + " at line " + (parseLine + 1) + ": " + postLine + ", from: " + lines[parseLine]
-				+ (extra == null ? "." : ", extra info: " + extra));
+		throw new CommandParseException(getParseExceptString(preAt, postLine, extra));
 	}
 	
 	////////////////////////////////////////////////
@@ -1821,7 +1858,7 @@ public class Script
 						Command[] cmds = so.getMemberCommands();
 						for (int i = 0; i < cmds.length; i++)
 							str += "    " + cmds[i].getInfoString() + "\n";
-						printCallback.accept("Type: " + so.getTypeName() + ", Desc: " + so.getDescription() + "\n  Cmds:\n" + str);
+						printCallback.accept(so.getInfoString() + "\n  Cmds:\n" + str);
 					}
 				}
 				else
@@ -1829,16 +1866,23 @@ public class Script
 			}
 			else
 			{
-				RunnableCommand cmd = parse(line, head);
-				if (cmd != null)
+				int fur = 1;
+				if (head.isInlineFor)
+					fur = valParse(CmdArg.INT, line, head.inlineFor);
+				for (int f = 0; f < fur; f++)
 				{
-					String out;
-					putVar(PREVIOUS, out = cmd.run(this));
-					for (int i = 0; i < head.storing.length; i++)
-						putVar(head.storing[i], out);
-					prevCallback.accept(head.name, out);
-					debugger.info(head.name, cmd.getInput(), out);
-					if (!popped.isEmpty() && !popped.pop().returns)
+					putVar(INDEX, "" + f);
+					RunnableCommand cmd = parse(line, head);
+					if (cmd != null)
+					{
+						String out;
+						putVar(PREVIOUS, out = cmd.run(this));
+						for (int i = 0; i < head.storing.length; i++)
+							putVar(head.storing[i], out);
+						prevCallback.accept(head.name, out);
+						debugger.info(head.name, cmd.getInput(), out);
+					}
+					if (!popped.isEmpty() && !popped.pop().returns) // Popped isn't empty -> something returned. Old stack doesn't return to anything -> end script.
 						break;
 				}
 			}

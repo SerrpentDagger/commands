@@ -3,15 +3,16 @@ package commands;
 import java.awt.Color;
 import java.lang.reflect.Array;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 
 import commands.BooleanExp.Comp;
-import utilities.HashBins;
+import commands.DoubleExp.Oper;
+import utilities.ArrayUtils;
 
 public abstract class CmdArg<T>
 {
-	private static final HashBins<Class<?>, CmdArg<?>> ARGS = new HashBins<>();
+	static final HashMap<Class<?>, LinkedHashMap<String, CmdArg<?>>> ARGS = new HashMap<>();
 	private static final HashMap<Class<?>, Class<?>> WRAP_PRIMITIVE = new HashMap<>();
 	{
 		WRAP_PRIMITIVE.put(boolean.class, Boolean.class);
@@ -30,23 +31,25 @@ public abstract class CmdArg<T>
 
 	public static <T> CmdArg<T> reg(CmdArg<T> arg, Class<T> toClass)
 	{
-		HashSet<CmdArg<?>> bin = ARGS.getBin(toClass);
+		LinkedHashMap<String, CmdArg<?>> bin = ARGS.get(toClass);
 		if (bin != null)
 		{
-			Iterator<CmdArg<?>> it = bin.iterator();
-			boolean reg = true;
-			while (reg && it.hasNext())
-				reg = it.next().getRegId() != arg.getRegId();
+			if (!bin.containsKey(arg.regId))
+				bin.put(arg.regId, arg);
 		}
 		else
-			ARGS.add(toClass, arg);
+		{
+			LinkedHashMap<String, CmdArg<?>> mp = new LinkedHashMap<>();
+			mp.put(arg.regId, arg);
+			ARGS.put(toClass, mp);
+		}
 		return arg;
 	}
 	
 	@SuppressWarnings("unchecked")
 	public static <T> CmdArg<T> getArgFor(Class<T> cls)
 	{
-		HashSet<CmdArg<?>> bin = ARGS.getBin(cls);
+		LinkedHashMap<String, CmdArg<?>> bin = ARGS.get(cls);
 		if (bin == null || bin.isEmpty())
 		{
 			if (cls.isArray())
@@ -65,7 +68,7 @@ public abstract class CmdArg<T>
 			}
 			return null;
 		}
-		Iterator<CmdArg<?>> it = bin.iterator();
+		Iterator<CmdArg<?>> it = bin.values().iterator();
 		return (CmdArg<T>) it.next();
 	}
 	
@@ -87,7 +90,7 @@ public abstract class CmdArg<T>
 	
 	public final String type;
 	public final Class<T> cls;
-	private int regId = 0;
+	private String regId = "";
 	public CmdArg(String type, Class<T> cls)
 	{
 		this.type = type;
@@ -96,17 +99,30 @@ public abstract class CmdArg<T>
 			throw new IllegalStateException("Only positive token counts can be parsed.");
 	}
 	
+	public String getInfoString()
+	{
+		String inf = "";
+		String[] rt = this.type.split(" ");
+		for (int j = 0; j < rt.length; j++)
+		{
+			rt[j] = (this.rawToken(j) ? Script.RAW : "") + rt[j];
+			inf += rt[j] + (j == rt.length - 1 ? "" : " ");
+		}
+		return inf;
+	}
+	
 	public boolean rawToken(int ind) { return false; }
 	public int tokenCount() { return 1; }
 	
 	public CmdArg<T> reg() { return reg(regId); }
-	public CmdArg<T> reg(int regId)
+	public CmdArg<T> reg(int i) { return reg("" + i); }
+	public CmdArg<T> reg(String regId)
 	{
 		this.regId = regId;
 		reg(this, cls);
 		return this;
 	}
-	public int getRegId() { return regId; }
+	public String getRegId() { return regId; }
 	
 	public abstract T parse(String trimmed);
 	public T parse(String[] tokens, int off)
@@ -302,6 +318,27 @@ public abstract class CmdArg<T>
 		}
 	}.reg();
 	
+	public static final CmdArg<Double> DOUBLE_EXPRESSION = new CmdArg<Double>("Double Operation Double", Double.class)
+	{
+		@Override
+		public int tokenCount()
+		{
+			return 3;
+		}
+		
+		@Override
+		public Double parse(String trimmed)
+		{
+			String[] tokens = Script.tokensOf(trimmed);
+			Double a = DOUBLE.parse(tokens[0]);
+			Double b = DOUBLE.parse(tokens[2]);
+			Oper op = DoubleExp.Oper.parse(tokens[1]);
+			if (ArrayUtils.contains(ArrayUtils.of(a, b, op), null))
+				return null;
+			return op.eval(a, b);
+		}
+	}.reg(1);
+	
 	public static final CmdArg<Float> FLOAT = new CmdArg<Float>("Float", Float.class)
 	{	
 		@Override
@@ -345,12 +382,23 @@ public abstract class CmdArg<T>
 		}
 	};
 	
-	public static final CmdArg<String> SCRIPT_OBJECT = new CmdArg<String>("Object", String.class)
+	@SuppressWarnings("rawtypes")
+	public static final CmdArg<ObjectType> SCRIPT_OBJECT = new CmdArg<ObjectType>("Object Type", ObjectType.class)
 	{
 		@Override
-		public String parse(String trimmed)
+		public int tokenCount()
 		{
-			return TOKEN.parse(trimmed);
+			return 2;
+		}
+		
+		@Override
+		public ObjectType<?> parse(String trimmed)
+		{
+			String[] tokens = Script.tokensOf(trimmed);
+			if (!Script.isType(tokens[1]))
+				return null;
+			ScriptObject<?> so = Script.getType(tokens[1]);
+			return so.getObjectType(tokens[0]);
 		}
 	};
 	

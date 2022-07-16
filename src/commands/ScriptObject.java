@@ -1,5 +1,7 @@
 package commands;
 
+import java.lang.reflect.Array;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -8,34 +10,39 @@ import java.util.Map.Entry;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import commands.Script.CommandParseException;
+import utilities.StringUtils;
 
 public class ScriptObject<T>
 {
 	public final HashMap<String, T> objs = new HashMap<String, T>();
 	
 	private final String typeName;
-	private final CmdArg<?>[] constArgs;
 	private String description;
-	private SOConstruct<T> constructor;
 	private int unparseID = 0;
 	
+	private ScriptObject<? extends T> lastParsedType = null;
+	private int argRegID = 0;
 	private CmdArg<T> cmdArg;
+	private CmdArg<T>[] inlineConst;
 	private final HashSet<ScriptObject<? extends T>> subs = new HashSet<>();
 	private final LinkedHashMap<String, Command> memberCmds = new LinkedHashMap<>();
 	
 	////////////////////////////
 	
-	public ScriptObject(String typeName, String description, Class<T> cl, CmdArg<?>... constArgs)
+	@SuppressWarnings("unchecked")
+	public ScriptObject(String typeName, String description, Class<T> cl)
 	{
 		this.typeName = typeName;
 		this.description = description;
-		this.constArgs = constArgs;
+		final ScriptObject<T> tmp = this;
+		inlineConst = (CmdArg<T>[]) Array.newInstance(CmdArg.class, 0);
 		
 		cmdArg = new CmdArg<T>(typeName, cl)
 		{
 			@Override
 			public T parse(String trimmed)
 			{
+				lastParsedType = tmp;
 				T obj = objs.get(trimmed), old = null;
 				if (obj != null)
 					return obj;
@@ -45,7 +52,10 @@ public class ScriptObject<T>
 					if (old != null && obj != null)
 						throw new CommandParseException("The key '" + trimmed + "' exists in at least two subtypes of " + typeName);
 					if (obj != null)
-						old = obj;					
+					{
+						old = obj;
+						lastParsedType = sub.lastParsedType;
+					}
 				}
 				return old;
 			}
@@ -61,18 +71,21 @@ public class ScriptObject<T>
 						if (obj.equals(ent.getValue()))
 								return ent.getKey();
 				}
-				String name = typeName + unparseID++;
+				String name = newObjKey();
 				objs.put(name, obj);
 				return name;
 			};
 		}.reg();
 	}
 	
-	public void construct(Script ctx, String name, Object[] params)
+	public String newObjKey()
 	{
-		if (constructor == null)
-			throw new IllegalStateException("Null constructor for ScriptObject of type: " + typeName);
-		objs.put(name, constructor.construct(ctx, name, params));
+		return typeName + unparseID++;
+	}
+	
+	public String newArgRegID()
+	{
+		return typeName + argRegID++;
 	}
 	
 	public boolean isObject(String trimmed)
@@ -85,32 +98,38 @@ public class ScriptObject<T>
 		return cmdArg.parse(trimmed);
 	}
 	
+	@SuppressWarnings("unchecked")
+	public ObjectType<T> getObjectType(String trimmed)
+	{
+		T obj = cmdArg.parse(trimmed);
+		return obj == null ? null : new ObjectType<T>(obj, (ScriptObject<T>) lastParsedType, trimmed);
+	}
+	
 	public boolean destroy(String trimmed)
 	{
 		AtomicBoolean out = new AtomicBoolean(false);
 		if (objs.remove(trimmed) != null)
 			out.set(true);
-		subs.forEach((sub) ->
-		{
-			if (sub.objs.remove(trimmed) != null)
+		Iterator<ScriptObject<? extends T>> it = subs.iterator();
+		while (!out.get() && it.hasNext())
+			if (it.next().objs.remove(trimmed) != null)
 				out.set(true);
-		});
-		return true;
+		return out.get();
 	}
 	
 	//////////
 	
-	public static <SO> ScriptObject<SO> supOf(String type, String description, Class<SO> cl, ScriptObject<? extends SO>[] subs, CmdArg<?>... constArgs)
+	public static <SO> ScriptObject<SO> supOf(String type, String description, Class<SO> cl, ScriptObject<? extends SO>[] subs)
 	{
-		ScriptObject<SO> sup = new ScriptObject<SO>(type, description, cl, constArgs);
+		ScriptObject<SO> sup = new ScriptObject<SO>(type, description, cl);
 		for (ScriptObject<? extends SO> ext : subs)
 			sup.subs.add(ext);
 		return sup;
 	}
 	
-	public static <SUP, SUB extends SUP> ScriptObject<SUB> subOf(String type, String description, Class<SUB> cl, ScriptObject<SUP> sup, CmdArg<?>... constArgs)
+	public static <SUP, SUB extends SUP> ScriptObject<SUB> subOf(String type, String description, Class<SUB> cl, ScriptObject<SUP> sup)
 	{
-		ScriptObject<SUB> sub = new ScriptObject<SUB>(type, description, cl, constArgs);
+		ScriptObject<SUB> sub = new ScriptObject<SUB>(type, description, cl);
 		sup.subs.add(sub);
 		return sub;
 	}
@@ -125,10 +144,69 @@ public class ScriptObject<T>
 		return cmd;
 	}
 	
-	public ScriptObject<T> setConstructor(SOConstruct<T> construct)
+	public CmdArg<T> add(SOConstruct<T> construct, CmdArg<?>... args)
 	{
-		this.constructor = construct;
-		return this;
+		int tokenCount = 0;
+		String format = "";
+		for (CmdArg<?> arg : args)
+		{
+			tokenCount += arg.tokenCount();
+			format += arg.type + " ";
+		}
+		format.trim();
+		final int tc = tokenCount;
+		
+		CmdArg<T> inline = new CmdArg<T>(format, cmdArg.cls)
+		{
+			@Override
+			public int tokenCount()
+			{
+				return tc;
+			}
+		
+			@Override
+			public boolean rawToken(int ind)
+			{
+				for (int i = 0; i < args.length; i++)
+				{
+					if (ind < args[i].tokenCount())
+						return args[i].rawToken(ind);
+					ind -= args[i].tokenCount();
+				}
+				return false;
+			}
+			
+			@Override
+			public T parse(String trimmed)
+			{
+				Object[] objs = new Object[args.length];
+				String[] tokens = Script.tokensOf(trimmed);
+				int t = 0;
+				for (int a = 0; a < args.length; a++)
+				{
+					String trmd = "";
+					for (int i = 0; i < args[a].tokenCount(); i++)
+						trmd += tokens[t + i] + (i == args[a].tokenCount() - 1 ? "" : " ");
+					t += args[a].tokenCount();
+					objs[a] = args[a].parse(trmd);
+					if (objs[a] == null)
+						return null;
+				}
+				
+				return construct.construct(objs);
+			}
+			
+			@Override
+			public String unparse(T obj)
+			{
+				return cmdArg.unparse(obj);
+			}
+		};
+		
+		inlineConst = Arrays.copyOf(inlineConst, inlineConst.length + 1);
+		inlineConst[inlineConst.length - 1] = inline;
+		inline.reg(newArgRegID());
+		return inline;
 	}
 	
 	public String getDescription()
@@ -158,12 +236,11 @@ public class ScriptObject<T>
 	
 	public String getInfoString()
 	{
-		return this.getTypeName() + " | Desc: " + this.getDescription();
-	}
-	
-	public CmdArg<?>[] getConstArgs()
-	{
-		return constArgs;
+		String inf = this.getTypeName() + " | Inline formats: '";
+		inf += cmdArg.getInfoString();
+		inf += StringUtils.toString(inlineConst, (arg) -> arg.getInfoString(), "', '", "', '", "'");
+		inf += ", Desc: " + this.getDescription();
+		return inf;
 	}
 	
 	public CmdArg<T> argOf()
@@ -191,8 +268,9 @@ public class ScriptObject<T>
 	
 	///////////////////////
 	
+	@FunctionalInterface
 	public interface SOConstruct<T>
 	{
-		public T construct(Script ctx, String name, Object[] objs);
+		public T construct(Object[] objs);
 	}
 }

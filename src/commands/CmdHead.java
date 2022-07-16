@@ -6,15 +6,25 @@ import utilities.StringUtils;
 
 public class CmdHead
 {
-	public final String inlineIf, name, input;
+	public final String inlineIf, inlineFor, name, input;
 	public final String[] storing, parentPath;
-	public final boolean isInlineIf, isInlineElse, printHelp, isMemberCmd;
+	public final boolean isInlineIf, isInlineElse, isInlineFor, printHelp, isMemberCmd;
 	
 	public CmdHead(String firstToken)
 	{
 		input = firstToken;
 		firstToken = StringUtils.endWithout(firstToken, Script.END_SCRIPT);
-		isInlineElse = firstToken.startsWith(Script.INLINE_ELSE);
+		String[] inlFor = firstToken.split(Pattern.quote(Script.INLINE_SEP), 2);
+		isInlineFor = inlFor.length == 2 && !inlFor[0].isEmpty();
+		if (isInlineFor)
+		{
+			inlineFor = inlFor[0];
+			firstToken = inlFor[1];
+		}
+		else
+			inlineFor = null;
+		
+		isInlineElse = !isInlineFor && firstToken.startsWith(Script.INLINE_SEP);
 		if (isInlineElse)
 			firstToken = firstToken.substring(1);
 		String[] inlIf = firstToken.split(Pattern.quote(Script.INLINE_IF));

@@ -4,6 +4,7 @@ public class Command
 {
 	private boolean isVarArgs = false, isDisabled = false;
 	boolean[] rawArg;
+	boolean[] nullable;
 	String name;
 	String ret;
 	String desc;
@@ -17,6 +18,7 @@ public class Command
 		this.ret = ret;
 		this.desc = desc;
 		rawArg = new boolean[args.length];
+		nullable = new boolean[args.length];
 	}
 	
 	public Command setFunc(CmdFunc func)
@@ -54,9 +56,21 @@ public class Command
 		return this;
 	}
 	
+	public Command nullable(int... indices)
+	{
+		for (int i : indices)
+			nullable[i] = true;
+		return this;
+	}
+	
 	public boolean rawToken(int arg, int tok)
 	{
 		return rawArg[arg] || args[arg].rawToken(tok);
+	}
+	
+	public boolean nullableArg(int arg)
+	{
+		return nullable[arg];
 	}
 	
 	public String getName()
@@ -78,15 +92,7 @@ public class Command
 	{
 		String str = "";
 		for (int i = 0; i < args.length; i++)
-		{
-			String[] rt = args[i].type.split(" ");
-			for (int j = 0; j < rt.length; j++)
-			{
-				rt[j] = (args[i].rawToken(j) ? Script.RAW : "") + rt[j];
-				str += rt[j] + (j == rt.length - 1 ? "" : " ");
-			}
-			str += (i == args.length - 1 ? "" : ", ");
-		}
+			str += args[i].getInfoString() + (i == args.length - 1 ? "" : ", ");
 		
 		if (isVarArgs)
 			str += "...";
