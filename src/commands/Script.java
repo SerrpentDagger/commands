@@ -34,9 +34,16 @@ import java.util.regex.Pattern;
 
 import arrays.AUtils;
 import commands.CmdArg.TypeArg;
+import commands.Command.CommandResult;
 import commands.Command.RunnableCommand;
+import commands.ParseTracker.BoxTracker;
+import commands.ParseTracker.DelimTracker;
+import commands.ParseTracker.MultiTracker;
+import commands.ParseTracker.RepeatTracker;
+import commands.ParseTracker.WrapTracker;
 import commands.Scope.SNode;
 import commands.libs.BuiltInLibs;
+import utilities.ArrayUtils;
 import utilities.StringUtils;
 
 public class Script
@@ -47,6 +54,8 @@ public class Script
 	
 	public static final String COMMENT = "//";
 	public static final char COMMENT_CHAR = '/';
+	public static final String MULTILINE_COMMENT_START = "<<", MULTILINE_COMMENT_END = ">>";
+	public static final char LINE_MERGE = '+';
 	
 	public static final String LABEL = "--", SCOPED_LABEL = "~~";
 	public static final String LABEL_REG = LABEL + "|" + SCOPED_LABEL;
@@ -65,6 +74,7 @@ public class Script
 	public static final String INLINE_SEP = ":";
 	public static final String MEMBER_ACCESS = ".";
 	public static final char ARR_S = '[', ARR_E = ']', ARR_ACCESS = '.', ARR_SEP = ';';
+	public static final char TOK_S = '(', TOK_E = ')', SCOPE_S = '{', SCOPE_E = '}';
 	public static final String ARR_LEN = "len";
 	public static final char STRING_CHAR = '"';
 	public static final char ESCAPE_CHAR = '\\';
@@ -75,11 +85,14 @@ public class Script
 	public static final String HELP_CHAR_STR = "" + HELP_CHAR;
 	public static final String INDEX = "INDEX";
 	public static final int NO_LABEL = -2;
-	public static final Label GLOBAL = new Label("GLOBAL", 0, false, true, false);
+	public static final Label GLOBAL = new Label("GLOBAL", -1, false, true, false);
 	public static final char UNRAW = '%', RAW = '$', REF = '@';
 	
 	public static final String ILLEGAL_VAR_REG_EX = "[^\\w\\-]";
 	public static final Pattern ILLEGAL_VAR_MATCHER = Pattern.compile(ILLEGAL_VAR_REG_EX);
+	
+	public static final String PARENTH_REG_EX = "[" + quote(TOK_S) + quote(TOK_E) + "]";
+	public static final Pattern PARENTH_MATCHER = Pattern.compile(PARENTH_REG_EX);
 	
 	public static final String BOOL = "boolean", VOID = "void", TOKEN = "token", TOKEN_ARR = ARR_S + TOKEN + ARR_E, STRING = "String", INT = "int", DOUBLE = "double", VALUE = "Value", OBJECT = "Object";
 	
@@ -94,7 +107,7 @@ public class Script
 	private final Scope scope = new Scope();
 	private final HashMap<String, Label> labels = new HashMap<String, Label>();
 	private final ArrayDeque<StackEntry> stack = new ArrayDeque<StackEntry>();
-	private final ArrayDeque<StackEntry> popped = new ArrayDeque<StackEntry>();
+	private StackEntry popped = null;
 	private Script parent = null;
 	public String path;
 	public String name = "BASE";
@@ -571,7 +584,7 @@ public class Script
 			for (int i = 0; i < count; i++)
 			{
 				ctx.putVar(INDEX, "" + i);
-				ctx.subRunFrom(lab);
+				ctx.runFrom(lab);
 				elements[i] = ctx.prev();
 			}
 			ctx.putVar(set.var, toArrayString(elements));
@@ -723,7 +736,7 @@ public class Script
 		for (CmdString str : strs)
 			out += str.unraw;
 		ctx.printCallback.accept(out);
-		return out;
+		return '"' + out + '"';
 	}).setVarArgs();
 	public static final Command PRINT_VARS = add("print_all_vars", VOID, "Prints all variables and their values.").setFunc((ctx, objs) ->
 	{
@@ -902,7 +915,7 @@ public class Script
 		for (int i = 0; i < count; i++)
 		{
 			ctx.putVar(INDEX, "" + i);
-			ctx.subRunFrom(lab, (VarSet[]) objs[2]);
+			ctx.runFrom(lab, (VarSet[]) objs[2]);
 		}
 		return ctx.prev();
 	}).setVarArgs();
@@ -917,11 +930,11 @@ public class Script
 		{
 			ctx.putVar(INDEX, "" + ind);
 			ind++;
-			ctx.subRunFrom(lab, (VarSet[]) objs[2]);
+			ctx.runFrom(lab, (VarSet[]) objs[2]);
 		}
 		return ctx.prev();
 	}).rawArg(0).setVarArgs();
-	public static final Command GOTO = add("goto", VOID, "Excecutes the given token label in a new stack entry. Sets variables to values provided.", CmdArg.TOKEN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
+	public static final Command CALL = add("call", VOID, "Excecutes the given token label in a new stack entry. Sets variables to values provided.", CmdArg.TOKEN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
 	{
 		String label = (String) objs[0];
 		if (label.equals(NULL))
@@ -936,32 +949,28 @@ public class Script
 		
 		return ctx.prev();
 	}).setVarArgs();
-	public static final Command SKIPTO = add("skipto", VOID, "Skips excecution to the given token label, without modifying the stack or scope.", CmdArg.TOKEN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
-	{
-		String label = (String) objs[0];
-		if (label.equals(NULL))
-			return ctx.prev();
-		
-		Label lab = ctx.getLabel(label);
-		if (lab == null)
-			ctx.parseExcept("Invalid label specification", label, "No label found.");
-		
-		for (int i = 0; i < ((VarSet[]) objs[1]).length; i++)
-		{
-			VarSet var = ((VarSet[]) objs[1])[i];
-			ctx.putVar(var.var, var.set.raw);
-		}
-		
-		ctx.parseLine = lab.line;
-		
-		return ctx.prev();
-	}).setVarArgs();
+	public static final Command GOTO = overload("goto", CALL, "No difference, but exists for temporary backwards compatibility.", (objs) -> objs, CALL.args).setVarArgs();
 	public static final Command RETURN = add("return", VOID, "Marks the end of a label or code section. If present, will set PREV to argument, or array of arguments if more than one is provided.", CmdArg.TOKEN).setFunc((ctx, objs) ->
 	{
 		String[] rets = (String[]) objs[0];
 		SNode last = ctx.popStack();
 		if (rets.length == 0)
 			return last.get(PREVIOUS);
+		else if (rets.length == 1)
+			return rets[0];
+		else
+		{
+			String out = "" + ARR_S;
+			for (int i = 0; i < rets.length; i++)
+				out += rets[i] + (i == rets.length - 1 ? ARR_E : " " + ARR_SEP);
+			return out;
+		}
+	}).setVarArgs();
+	public static final Command ECHO = add("echo", VOID, "Sets PREV to argument, or array of arguments if more than one is provided.", CmdArg.TOKEN).setFunc((ctx, objs) ->
+	{
+		String[] rets = (String[]) objs[0];
+		if (rets.length == 0)
+			return ctx.prev();
 		else if (rets.length == 1)
 			return rets[0];
 		else
@@ -1029,7 +1038,7 @@ public class Script
 			{
 				script.putVar(Script.PARENT, ctx.name);
 				script.name = name.unraw;
-				script.subRunFrom(lab, (VarSet[]) objs[4]);
+				script.runFrom(lab, (VarSet[]) objs[4]);
 				if ((boolean) objs[3])
 					ctx.integrateVarsFrom(script);
 				
@@ -1236,6 +1245,13 @@ public class Script
 		
 		return token.startsWith("" + ARR_S) && token.endsWith("" + ARR_E);
 	}
+	public boolean isExecutable(String token)
+	{
+		String var = getVar(token);
+		if (var != null)
+			return isExecutable(var);
+		return token.startsWith("" + SCOPE_S) && token.endsWith("" + SCOPE_E);
+	}
 	public boolean isString(String token)
 	{
 		String var = getVar(token);
@@ -1249,48 +1265,68 @@ public class Script
 		return OBJECTS.containsKey(token);
 	}
 	
-	public static String[] argsOf(String line)
+	private static final DelimTracker QTRACK = new DelimTracker(STRING_CHAR, ESCAPE_CHAR);
+	private static final BoxTracker
+			ARRTRACK = new BoxTracker(ARR_S, ARR_E, ESCAPE_CHAR),
+			PARTRACK = new BoxTracker(TOK_S, TOK_E, ESCAPE_CHAR),
+			CURLTRACK = new BoxTracker(SCOPE_S, SCOPE_E, ESCAPE_CHAR);
+	private static final WrapTracker MCOMTRACK = new WrapTracker(MULTILINE_COMMENT_START, MULTILINE_COMMENT_END, ESCAPE_CHAR);
+	private static final RepeatTracker LCOMTRACK = new RepeatTracker(COMMENT_CHAR, ESCAPE_CHAR, 2);
+	private static final MultiTracker COMTRACK = new MultiTracker(MCOMTRACK, LCOMTRACK);
+	private static final MultiTracker SYNTRACK = new MultiTracker(ARRTRACK, PARTRACK, CURLTRACK);
+	
+	private static boolean multilineComment = false;
+	private static String stripComments(String line)
 	{
-		line = line.trim();
 		String str = "";
+		QTRACK.reset();
+		COMTRACK.resetIf((tracker) -> tracker != MCOMTRACK || !multilineComment);
 		for (int i = 0; i < line.length(); i++)
 		{
 			char parse = line.charAt(i);
-			if (parse == ' ')
-				break;
-			else
+			QTRACK.track(parse);
+			
+			COMTRACK.track(parse, QTRACK.inside());
+			
+			if (!(multilineComment = MCOMTRACK.inside() || MCOMTRACK.wasInside()))
+			{
+				if (LCOMTRACK.inside())
+					return str.substring(0, str.length() - 1);
 				str += parse;
+			}
+			else if (!MCOMTRACK.wasInside())
+				str = str.substring(0, str.length() - 1);
 		}
-		line = line.replaceFirst(quote(str), "");
+		return str.trim();
+	}
+	private static boolean syntaxCheck(String line)
+	{
+		QTRACK.reset();
+		SYNTRACK.reset();
+		for (int i = 0; i < line.length(); i++)
+		{
+			char parse = line.charAt(i);
+			QTRACK.track(parse);
+			SYNTRACK.track(parse, QTRACK.inside());
+		}
+		return !(QTRACK.inside() || SYNTRACK.insideOne());
+	}
+	public static String[] argsOf(String line)
+	{
+		line = line.trim().replaceFirst("\\S* *", "");
 		
 		ArrayList<String> args = new ArrayList<String>();
 		
 		String arg = "";
-		int quotes = 0;
-		int comment = 0;
+		QTRACK.reset();
+		SYNTRACK.reset();
 		for (int i = 0; i < line.length(); i++)
 		{
-			if (comment == 2)
-				break;
-			
-			boolean escaped = i > 0 && line.charAt(i - 1) == ESCAPE_CHAR;
 			char parseChar = line.charAt(i);
 			
-			if (!escaped)
-			{
-				quotes += sameChar(parseChar, STRING_CHAR);
-				if (quotes % 2 != 1)
-				{
-					int com = sameChar(parseChar, COMMENT_CHAR);
-					comment = com == 0 ? 0 : comment + com;
-					if (comment == 2)
-						arg = arg.substring(0, arg.length() - 1);
-				}
-			}
-			
-			boolean inQuote = quotes % 2 == 1;
-			boolean commented = comment == 2;
-			boolean buildingArg = !commented && (inQuote || parseChar != ',');
+			QTRACK.track(parseChar);
+			SYNTRACK.track(parseChar, QTRACK.inside());
+			boolean buildingArg = (QTRACK.inside() || SYNTRACK.insideOne() || parseChar != ',');
 			
 			if (buildingArg)
 				arg += parseChar;
@@ -1312,27 +1348,23 @@ public class Script
 		String str = token.trim();
 		
 		String acc = "";
-		int quotes = 0;
-		int arraysDeep = 0;
+		QTRACK.reset();
+		SYNTRACK.reset();
 		for (int i = 0; i < str.length(); i++)
 		{
-			boolean escaped = i > 0 && str.charAt(i - 1) == ESCAPE_CHAR;
 			char parse = str.charAt(i);
 			
-			if (!escaped)
-			{
-				quotes += sameChar(parse, STRING_CHAR);
-				arraysDeep += sameChar(parse, ARR_S);
-				arraysDeep -= sameChar(parse, ARR_E);
-			}
+			QTRACK.track(parse);
+			SYNTRACK.track(parse, QTRACK.inside());
 			
-			boolean inQuote = quotes % 2 == 1;
-			boolean inArray = arraysDeep > 0;
 			boolean inWord = parse != ARR_ACCESS;
-			boolean buildingAcc = inQuote || inArray || inWord;
+			boolean buildingAcc = inWord || QTRACK.inside() || SYNTRACK.insideOne();
 			
 			if (buildingAcc)
-				acc += parse;
+			{
+				if (!(PARTRACK.justEntered() || PARTRACK.justLeft()))
+					acc += parse;
+			}
 			else if (!acc.isEmpty())
 			{
 				access.add(acc);
@@ -1351,24 +1383,17 @@ public class Script
 		String str = line.trim();
 		
 		String tok = "";
-		int quotes = 0;
-		int arraysDeep = 0;
+		QTRACK.reset();
+		SYNTRACK.reset();
 		for (int i = 0; i < str.length(); i++)
 		{
-			boolean escaped = i > 0 && str.charAt(i - 1) == ESCAPE_CHAR;
 			char parseChar = str.charAt(i);
+
+			QTRACK.track(parseChar);
+			SYNTRACK.track(parseChar, QTRACK.inside());
 			
-			if (!escaped)
-			{
-				quotes += sameChar(parseChar, STRING_CHAR);
-				arraysDeep += sameChar(parseChar, ARR_S);
-				arraysDeep -= sameChar(parseChar, ARR_E);
-			}
-			
-			boolean inQuote = quotes % 2 == 1;
-			boolean inArray = arraysDeep > 0;
 			boolean inWord = parseChar != ' ' && parseChar != ',' && parseChar != ARR_SEP;
-			boolean buildingToken = inQuote || inArray || inWord;
+			boolean buildingToken = inWord || QTRACK.inside() || SYNTRACK.insideOne();
 			
 			if (buildingToken)
 				tok += parseChar;
@@ -1537,7 +1562,11 @@ public class Script
 		
 		String var = getVar(trm); // trm is not an array.
 		if (var != null && !raw) // If not raw, it is a request to use the contents of the variable.
+		{
+			if (isExecutable(var))
+				return runExecutable(var).output;
 			return var;
+		}
 		else
 			return trm;
 	}
@@ -1597,6 +1626,15 @@ public class Script
 			return str.replaceFirst(quote(find), rep);
 		return str;
 	}
+	public static String[] replaceTokenWith(String[] tokens, String[] toInsert, int index)
+	{
+		String[] tokensExt = new String[tokens.length - 1 + toInsert.length];
+		ArrayUtils.fillFrom(tokensExt, tokens, 0, 0, index);
+		ArrayUtils.fillFrom(tokensExt, toInsert, index, 0, toInsert.length);
+		if (index != tokens.length - 1)
+			ArrayUtils.fillFrom(tokensExt, tokens, index + toInsert.length, index + 1, tokens.length - (index + 1));
+		return tokensExt;
+	}
 	
 	public static File getScriptFile(String unraw)
 	{
@@ -1644,8 +1682,18 @@ public class Script
 					{
 						boolean atVA = varArgs && argInd >= args.length - 1;
 						boolean firstVarArg = varArgs && argInd == args.length - 1;
+						int varArgInd = Math.min(argInd, args.length - 1);
 						
 						String[] tokens = tokensOf(argStrs[argInd]);
+						for (int tokInd = 0; tokInd < tokens.length; tokInd++)
+						{
+							if (isExecutable(tokens[tokInd]))
+							{
+								CommandResult res = runExecutable(getVarOrReturnParam(tokens[tokInd]));
+								tokens = replaceTokenWith(tokens, tokensOf(res.output), tokInd);
+								tokInd--;
+							}
+						}
 						
 						if (varArgArray && !firstVarArg)
 							parseExcept("Invalid argument count", line, "If var-arg arguments are specified as an array, the array must be the last argument");
@@ -1675,11 +1723,11 @@ public class Script
 								}
 								
 								for (int tokInArg = 0; tokInArg < count; tokInArg++)
-									trimmed += varParse(cmd, Math.min(argInd, args.length - 1), tokInArg, tokens[tokInArg]) + " ";
+									trimmed += varParse(cmd, varArgInd, tokInArg, tokens[tokInArg]) + " ";
 								
 								trimmed = trimmed.trim();
 								obj = arg.parse(trimmed);
-								if (obj == null && !cmd.nullableArg(argInd))
+								if (obj == null && !cmd.nullableArg(varArgInd))
 								{
 									bufferedPEs.push(getParseExceptString("Invalid token resolution", trimmed, "Expected type: " + arg.type));
 									continue;
@@ -1705,7 +1753,7 @@ public class Script
 							if (obj != null)
 								input += trimmed + (argInd == argStrs.length - 1 ? "" : ", ");
 						} while (obj == null && binIt != null && binIt.hasNext() && (arg = binIt.next()) != null);
-						if (obj == null && !cmd.nullableArg(argInd))
+						if (obj == null && !cmd.nullableArg(varArgInd))
 						{
 							String pe = "Invalid argument resolution for arg " + (argInd + 1) + ". Encountered the following problems for subsequent parse formats: ";
 							for (String str : bufferedPEs)
@@ -1759,25 +1807,43 @@ public class Script
 		path = null;
 		String str = "";
 		int num = 0;
+		multilineComment = false;
+		ArrayList<Integer> merges = new ArrayList<Integer>();
 		while (scan.hasNextLine())
 		{
-			String line = scan.nextLine();
+			String line = stripComments(scan.nextLine());
 			if (line.startsWith(LABEL) || line.startsWith(SCOPED_LABEL))
-			{
 				putLabel(firstToken(line), num);
-			}
 			else if (line.startsWith(END_SCRIPT))
 				break;
-			else if (line.trim().endsWith(END_SCRIPT))
+			else if (line.endsWith(END_SCRIPT))
 			{
 				str += StringUtils.endWithout(line, END_SCRIPT);
 				break;
 			}
+			else if (line.startsWith("" + LINE_MERGE))
+				merges.add(num);
 			
 			str += line.trim() + "\n";
 			num++;
 		}
 		lines = str.split("\n");
+		for (int i = merges.size() - 1; i >= 0; i--)
+		{
+			int m = merges.get(i);
+			String toMerge = lines[m].replaceFirst(quote(LINE_MERGE), "");
+			if (m > 0)
+			{
+				lines[m - 1] += " " + toMerge.trim();
+				lines[m] = "";
+			}
+			else
+				lines[m] = toMerge.trim();
+		}
+		for (int i = 0; i < lines.length; i++)
+			if (!syntaxCheck(lines[i]))
+				throw new CommandParseException("Invalid syntax at line " + (i + 1) + ": " + lines[i] + ". Unfinished delimiter.");
+
 		putVar(PARENT, NULL);
 	}
 	
@@ -1812,17 +1878,10 @@ public class Script
 			this.exceptionCallback.accept(e);
 		}
 	}
-	public void subRunFrom(Label start, VarSet... varSets)
+	private int labelsDeep = 0;
+	private void runFrom(Label label, VarSet... varSets)
 	{
-		runFrom(start, false, varSets);
-	}
-	private void runFrom(Label start, VarSet... varSets)
-	{
-		runFrom(start, true, varSets);
-	}
-	private void runFrom(Label label, boolean returns, VarSet... varSets)
-	{
-		pushStack(label, returns);
+		pushStack(label);
 		for (VarSet var : varSets)
 			putVar(var.var, var.set.raw);
 		if (keyIn == null)
@@ -1831,63 +1890,78 @@ public class Script
 		while(parseLine < lines.length && !stack.isEmpty() && !forceKill.get())
 		{
 			String line = lines[parseLine];
-			if (line.startsWith(COMMENT) || line.isEmpty() || line.startsWith(LABEL) || line.startsWith(SCOPED_LABEL))
+			if (line.startsWith(LABEL) || line.startsWith(SCOPED_LABEL))
+				labelsDeep++;
+			else if (labelsDeep == 0)
 			{
-				parseLine++;
-				continue;
-			}
-			else if (line.trim().equals(HELP_CHAR_STR))
-			{
-				PRINT_COMMANDS.func.cmd(this, (Object[]) null);
-				parseLine++;
-				continue;
-			}
-			String first = firstToken(line);
-			CmdHead head = new CmdHead(first);
-			if (head.printHelp)
-			{
-				Command command = getCommand(head);
-				if (command == null)
+				if (line.trim().equals(HELP_CHAR_STR))
 				{
-					ScriptObject<?> so = OBJECTS.get(head.name);
-					if (so == null)
-						parseExcept("Unrecognized command for help request", "Cannot display help text");
-					else
-					{
-						String str = "";
-						Command[] cmds = so.getMemberCommands();
-						for (int i = 0; i < cmds.length; i++)
-							str += "    " + cmds[i].getInfoString() + "\n";
-						printCallback.accept(so.getInfoString() + "\n  Cmds:\n" + str);
-					}
+					PRINT_COMMANDS.func.cmd(this, (Object[]) null);
+					parseLine++;
+					continue;
 				}
-				else
-					printCallback.accept(command.getInfoString());
+				CommandResult res = runExecutable(line);
+				if (res.shouldBreak)
+					break;
 			}
-			else
-			{
-				int fur = 1;
-				if (head.isInlineFor)
-					fur = valParse(CmdArg.INT, line, head.inlineFor);
-				for (int f = 0; f < fur; f++)
-				{
-					putVar(INDEX, "" + f);
-					RunnableCommand cmd = parse(line, head);
-					if (cmd != null)
-					{
-						String out;
-						putVar(PREVIOUS, out = cmd.run(this));
-						for (int i = 0; i < head.storing.length; i++)
-							putVar(head.storing[i], out);
-						prevCallback.accept(head.name, out);
-						debugger.info(head.name, cmd.getInput(), out);
-					}
-					if (!popped.isEmpty() && !popped.pop().returns) // Popped isn't empty -> something returned. Old stack doesn't return to anything -> end script.
-						break;
-				}
-			}
+			else if (new CmdHead(firstToken(line)).name.equals(RETURN.name))
+				labelsDeep--;
 			parseLine++;
 		}
+	}
+	private CommandResult runExecutable(String executableLine)
+	{
+		String line = executableTrim(executableLine);
+		if (line.startsWith(LABEL) || line.startsWith(SCOPED_LABEL))
+			return new CommandResult(prev(), false);
+		String first = firstToken(line);
+		CmdHead head = new CmdHead(first);
+		if (head.printHelp)
+		{
+			Command command = getCommand(head);
+			if (command == null)
+			{
+				ScriptObject<?> so = OBJECTS.get(head.name);
+				if (so == null)
+					parseExcept("Unrecognized command for help request", "Cannot display help text");
+				else
+				{
+					String str = "";
+					Command[] cmds = so.getMemberCommands();
+					for (int i = 0; i < cmds.length; i++)
+						str += "    " + cmds[i].getInfoString() + "\n";
+					printCallback.accept(so.getInfoString() + "\n  Cmds:\n" + str);
+				}
+			}
+			else
+				printCallback.accept(command.getInfoString());
+		}
+		else
+		{
+			int fur = 1;
+			if (head.isInlineFor)
+				fur = valParse(CmdArg.INT, line, head.inlineFor);
+			for (int f = 0; f < fur; f++)
+			{
+				putVar(INDEX, "" + f);
+				RunnableCommand cmd = parse(line, head);
+				if (cmd != null)
+				{
+					String out;
+					putVar(PREVIOUS, out = cmd.run(this));
+					for (int i = 0; i < head.storing.length; i++)
+						putVar(head.storing[i], out);
+					prevCallback.accept(head.name, out);
+					debugger.info(head.name, cmd.getInput(), out);
+				}
+				if (popped != null) // Popped isn't empty -> something returned. Old stack doesn't return to anything -> end script.
+				{
+					popped = null;
+					return new CommandResult(prev(), true);
+				}
+			}
+		}
+		return new CommandResult(prev(), false);
 	}
 	public void goTo(String label)
 	{
@@ -1895,7 +1969,7 @@ public class Script
 		if (lab == null)
 			parseExcept("Invalid label specification", label, "No label found.");
 		
-		pushStack(lab, true);
+		pushStack(lab);
 	}
 	
 	public boolean putVarType(String name, String val, CmdArg<?> type, String prompt)
@@ -1948,13 +2022,25 @@ public class Script
 		scope.integrateFrom(other.scope);
 	}
 	
+	public String getVarOrReturnParam(String nameOrReturn)
+	{
+		String got = getVar(nameOrReturn);
+		if (got != null)
+			return getVarOrReturnParam(got);
+		return nameOrReturn;
+	}
 	public String getVar(String name)
 	{
 		String trm = getTrim(name);
 		String got = scope.get(trm);
 		boolean ref = got != null && got.startsWith("" + REF);
 		if (ref)
-			return getVar(got.substring(1));
+		{
+			String target = got.substring(1);
+			if (isExecutable(target))
+				return target;
+			return getVar(target);
+		}
 		
 		if (got != null && got.startsWith("" + ARR_S) && got.endsWith("" + ARR_E))
 		{
@@ -1985,6 +2071,13 @@ public class Script
 			str = str.substring(0, str.length() - 1);
 		return str;
 	}
+	public static String executableTrim(String token)
+	{
+		String str = token.trim();
+		if (str.startsWith("" + SCOPE_S) && str.endsWith("" + SCOPE_E))
+			return str.substring(1, str.length() - 1).trim();
+		return str;
+	}
 	public static String stringTrim(String string)
 	{
 		String str = string.trim();
@@ -1992,6 +2085,10 @@ public class Script
 			return str.substring(1, str.length() - 1);
 		else
 			return str;
+	}
+	public static String tokTrim(String token)
+	{
+		return StringUtils.startWithout(StringUtils.endWithout(token.trim(), "" + TOK_E), "" + TOK_S);
 	}
 	
 	public static boolean[] prefixModsFrom(String test, String[] valid)
@@ -2024,10 +2121,10 @@ public class Script
 		return labels.get(label.replaceFirst(LABEL_REG, ""));
 	}
 	
-	private void pushStack(Label to, boolean returns)
+	private void pushStack(Label to)
 	{
-		stack.push(new StackEntry(parseLine, to, returns));
-		parseLine = to.line;
+		stack.push(new StackEntry(parseLine, to));
+		parseLine = to.line + 1;
 		if (to.isScoped)
 			scope.push(to);
 	}
@@ -2035,7 +2132,7 @@ public class Script
 	private SNode popStack()
 	{
 		StackEntry ent = stack.pop();
-		popped.push(ent);
+		popped = ent;
 		parseLine = ent.from;
 		if (ent.to.isScoped)
 			return scope.pop();

@@ -129,6 +129,18 @@ public class Command
 		}
 	}
 	
+	public static class CommandResult
+	{
+		public final String output;
+		public final boolean shouldBreak;
+		
+		public CommandResult(String out, boolean brk)
+		{
+			output = out;
+			shouldBreak = brk;
+		}
+	}
+	
 	@FunctionalInterface
 	public static interface CmdFunc
 	{

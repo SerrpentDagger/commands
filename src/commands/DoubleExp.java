@@ -24,7 +24,7 @@ public class DoubleExp
 		MULT("*", (a, b) -> a * b),
 		DIVI("/", (a, b) -> a / b),
 		POW("**", (a, b) -> Math.pow(a, b)),
-		ROOT("//", (a, b) -> Math.pow(a, 1d / b)),
+		ROOT("/*", (a, b) -> Math.pow(a, 1d / b)),
 		MOD("%", (a, b) -> a % b);
 		
 		////////////////
