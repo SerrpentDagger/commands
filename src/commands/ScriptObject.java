@@ -76,7 +76,7 @@ public class ScriptObject<T>
 				objs.put(name, obj);
 				return name;
 			};
-		}.reg();
+		}.reg("auto");
 	}
 	
 	public String newObjKey()
@@ -229,6 +229,11 @@ public class ScriptObject<T>
 		return inline;
 	}
 	
+	public void setDescription(String str)
+	{
+		description = str;
+	}
+	
 	public String getDescription()
 	{
 		return description;
@@ -256,9 +261,9 @@ public class ScriptObject<T>
 	
 	public String getInfoString()
 	{
-		String inf = this.getTypeName() + " | Inline formats: '";
-		inf += cmdArg.getInfoString();
-		inf += inlineConst.length > 0 ? StringUtils.toString(inlineConst, (arg) -> arg.getInfoString(), "', '", "', '", "'") : "'";
+		String inf = this.getTypeName() + " | Inline formats: ";
+		CmdArg<?>[] inline = CmdArg.ARGS.get(cmdArg.cls).values().toArray(new CmdArg<?>[0]);
+		inf += inline.length > 0 ? StringUtils.toString(inline, (arg) -> arg.getInfoString(), "'", "', '", "'") : "None";
 		inf += ", Desc: " + this.getDescription();
 		return inf;
 	}

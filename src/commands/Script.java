@@ -42,6 +42,7 @@ import commands.ParseTracker.MultiTracker;
 import commands.ParseTracker.RepeatTracker;
 import commands.ParseTracker.WrapTracker;
 import commands.Scope.SNode;
+import commands.libs.Bool;
 import commands.libs.BuiltInLibs;
 import mod.serpentdagger.artificialartificing.utils.group.MixedPair;
 import utilities.ArrayUtils;
@@ -348,8 +349,8 @@ public class Script
 			}
 			catch (IllegalAccessException | InvocationTargetException | InstantiationException | IllegalArgumentException err)
 			{
-				ctx.parseExcept("Exception occurred during invocation of auto-exposed executable '" + displayName + "'", "Exception follows in log.");
 				err.printStackTrace();
+				ctx.parseExcept("Exception occurred during invocation of auto-exposed executable '" + displayName + "'", "Exception follows in log.");
 			}
 			if (isVoid)
 				return ctx.prev();
@@ -390,7 +391,8 @@ public class Script
 				&& !cl.isAnonymousClass()
 				&& !cl.isHidden()
 				&& !cl.isLocalClass()
-				&& cl.getSuperclass() != null;
+				&& cl.getSuperclass() != null
+				&& cl != Class.class;
 	};
 	public static Command[] exposeAll(Member[] members, ScriptObject<?> to, ExpPredicate iff)
 	{
@@ -492,6 +494,12 @@ public class Script
 			Class<?>[] params = e.getParameterTypes();
 			for (int i = 0; good && i < params.length; i++)
 				good = CmdArg.getArgFor(params[i]) != null || (recursive && params[i].getConstructors().length > 0);
+		}
+		else
+		{
+			Field f = (Field) m;
+			Class<?> ret = f.getType();
+			good = CmdArg.getArgFor(ret) != null || (recursive && ret.getConstructors().length > 0);
 		}
 		return good;
 	}
@@ -1352,10 +1360,66 @@ public class Script
 		}
 		return !(QTRACK.inside() || SYNTRACK.insideOne());
 	}
+	public static String[] syntaxedSplit(String toSplit, String delim)
+	{
+		return syntaxedSplit(toSplit, quote(delim), delim.length(), -1);
+	}
+	public static String[] syntaxedSplit(String toSplit, String delim, int limit)
+	{
+		return syntaxedSplit(toSplit, quote(delim), delim.length(), limit);
+	}
+	public static String[] syntaxedSplit(String toSplit, String regEx, int trackLength, int limit)
+	{
+		Pattern pat = Pattern.compile(regEx);
+		QTRACK.reset();
+		SYNTRACK.reset();
+		
+		ArrayList<String> out = new ArrayList<>();
+		
+		String building = "";
+		String recent = "";
+		int found = 1;
+		for (int i = 0; i < toSplit.length(); i++)
+		{
+			char parse = toSplit.charAt(i);
+			
+			QTRACK.track(parse);
+			SYNTRACK.track(parse, QTRACK.inside());
+			
+			boolean push = false;
+			recent += parse;
+			if (recent.length() > trackLength)
+				recent = recent.substring(1);
+			if ((limit > 0 && found >= limit) || !pat.matcher(recent).matches() || QTRACK.inside() || SYNTRACK.insideOne())
+			{
+				building += parse;
+				
+				if (i == toSplit.length() - 1)
+					push = true;
+			}
+			else
+			{
+				push = true;
+				building = building.substring(0, building.length() - trackLength + 1);
+			}
+			
+			if (push && !building.isEmpty())
+			{
+				out.add(building);
+				building = "";
+				found++;
+			}
+		}
+		return out.toArray(new String[out.size()]);
+	}
 	public static String[] argsOf(String line)
 	{
-		line = line.trim().replaceFirst("\\S* *", "");
-		
+		String[] spl = syntaxedSplit(line.trim(), "\\s", 1, 2);
+		if (spl.length == 2)
+			line = spl[1];
+		else
+			return new String[0];
+			
 		ArrayList<String> args = new ArrayList<String>();
 		
 		String arg = "";
@@ -1452,10 +1516,7 @@ public class Script
 	private static int sameChar(char a, char b) { return a == b ? 1 : 0; }
 	public static String firstToken(String line)
 	{
-		String first = "";
-		for (int i = 0; i < line.length() && line.charAt(i) != ' '; i++)
-			first += line.charAt(i);
-		return first;
+		return syntaxedSplit(line, "\\s", 1, 2)[0];
 	}
 	public static String[] arrayElementsOf(String array)
 	{
@@ -1601,13 +1662,12 @@ public class Script
 			}
 		}
 		
+		if (isExecutable(trm))
+			return runExecutable(getVarOrReturnParam(trm)).output;
+		
 		String var = getVar(trm); // trm is not an array.
 		if (var != null && !raw) // If not raw, it is a request to use the contents of the variable.
-		{
-			if (isExecutable(var))
-				return runExecutable(var).output;
 			return var;
-		}
 		else
 			return trm;
 	}
@@ -1689,9 +1749,8 @@ public class Script
 		return scr;
 	}
 	
-	private boolean breakIf = true;
 	private final ArrayDeque<String> bufferedPEs = new ArrayDeque<>();
-	private RunnableCommand parse(String line, CmdHead head)
+	private RunnableCommand parse(String line, CmdHead head, Bool breakIf)
 	{
 		String[] argStrs = argsOf(line);
 		if (line.length() > 0)
@@ -1701,11 +1760,10 @@ public class Script
 			{
 				if (cmd.isDisabled())
 					parseExcept("Disabled command", cmd.name);
-				boolean inlIfVal = head.isInlineIf ? valParse(CmdArg.BOOLEAN, line, head.inlineIf) : true;
-				breakIf = breakIf && head.isInlineElse;
-				if (!breakIf && inlIfVal)
+				breakIf.set(breakIf.get() && head.isInlineElse);
+				if (!breakIf.get() && (head.isInlineIf ? valParse(CmdArg.BOOLEAN, line, head.inlineIf) : true))
 				{
-					breakIf = true;
+					breakIf.set(true);
 					CmdArg<?>[] args = cmd.args;
 					boolean varArgs = cmd.isVarArgs();
 					boolean varArgArray = argStrs.length > 0 && argStrs[argStrs.length - 1].startsWith(VAR_ARG_STR);
@@ -1928,6 +1986,7 @@ public class Script
 		if (keyIn == null)
 			keyIn = new Scanner(System.in);
 		
+		Bool breakIf = new Bool(false);
 		while(parseLine < lines.length && !stack.isEmpty() && !forceKill.get())
 		{
 			String line = lines[parseLine];
@@ -1941,7 +2000,7 @@ public class Script
 					parseLine++;
 					continue;
 				}
-				CommandResult res = runExecutable(line);
+				CommandResult res = runExecutable(line, breakIf);
 				if (res.shouldBreak)
 					break;
 			}
@@ -1951,6 +2010,10 @@ public class Script
 		}
 	}
 	private CommandResult runExecutable(String executableLine)
+	{
+		return runExecutable(executableLine, new Bool(false));
+	}
+	private CommandResult runExecutable(String executableLine, Bool breakIf)
 	{
 		String line = executableTrim(executableLine);
 		if (line.isEmpty() || line.startsWith(LABEL) || line.startsWith(SCOPED_LABEL))
@@ -1980,13 +2043,16 @@ public class Script
 		else
 		{
 			int fur = 1;
+			boolean whil = false;
 			if (head.isInlineFor)
 				fur = valParse(CmdArg.INT, line, head.inlineFor);
-			for (int f = 0; f < fur; f++)
+			if (head.isInlineWhile)
+				whil = valParse(CmdArg.BOOLEAN, line, head.inlineWhile);
+			if (head.isInlineFor || head.isInlineWhile)
+				putVar(INDEX, "0");
+			for (int f = 0; f < fur || (head.isInlineWhile && whil);)
 			{
-				if (head.isInlineFor)
-					putVar(INDEX, "" + f);
-				RunnableCommand cmd = parse(line, head);
+				RunnableCommand cmd = parse(line, head, breakIf);
 				if (cmd != null)
 				{
 					String out;
@@ -2001,6 +2067,11 @@ public class Script
 					popped = null;
 					return new CommandResult(prev(), true);
 				}
+				f++;
+				if (head.isInlineFor || head.isInlineWhile)
+					putVar(INDEX, "" + f);				
+				if (head.isInlineWhile)
+					whil = valParse(CmdArg.BOOLEAN, line, head.inlineWhile);
 			}
 			if (head.isInlineFor)
 				putVar(INDEX, "" + fur);

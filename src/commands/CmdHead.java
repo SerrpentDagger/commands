@@ -12,39 +12,49 @@ public class CmdHead
 	private static final DelimTracker QTRACK = new DelimTracker(Script.STRING_CHAR, Script.ESCAPE_CHAR);
 	private static final BoxTracker CURLTRACK = new BoxTracker(Script.SCOPE_S, Script.SCOPE_E, Script.ESCAPE_CHAR);
 	
-	public final String inlineIf, inlineFor, name, input;
+	public final String inlineIf, inlineFor, inlineWhile, name, input;
 	public final String[] storing, parentPath;
-	public final boolean isInlineIf, isInlineElse, isInlineFor, printHelp, isMemberCmd;
+	public final boolean isInlineIf, isInlineElse, isInlineFor, isInlineWhile, printHelp, isMemberCmd;
 	
 	public CmdHead(String firstToken)
 	{
 		input = firstToken;
 		firstToken = StringUtils.endWithout(firstToken, Script.END_SCRIPT);
-		String[] inlFor = firstToken.split(Pattern.quote(Script.INLINE_SEP), 2);
-		isInlineFor = inlFor.length == 2 && !inlFor[0].isEmpty();
+		String[] inlLoop = Script.syntaxedSplit(firstToken, Script.INLINE_SEP, 2);
+		
+		isInlineFor = inlLoop.length == 2 && !firstToken.startsWith(Script.INLINE_SEP);
 		if (isInlineFor)
 		{
-			inlineFor = inlFor[0];
-			firstToken = inlFor[1];
+			inlineFor = inlLoop[0];
+			firstToken = inlLoop[1];
 		}
 		else
 			inlineFor = null;
 		
+		isInlineWhile = inlLoop.length == 2 && firstToken.startsWith(Script.INLINE_SEP);
+		if (isInlineWhile)
+		{
+			inlineWhile = inlLoop[0];
+			firstToken = inlLoop[1];
+		}
+		else
+			inlineWhile = null;
+		
 		isInlineElse = !isInlineFor && firstToken.startsWith(Script.INLINE_SEP);
 		if (isInlineElse)
 			firstToken = firstToken.substring(1);
-		String[] inlIf = firstToken.split(Pattern.quote(Script.INLINE_IF));
+		String[] inlIf = Script.syntaxedSplit(firstToken, Script.INLINE_IF);
 		isInlineIf = inlIf.length == 2;
 		String[] storeSpl;
 		if (isInlineIf)
 		{
 			inlineIf = inlIf[0];
-			storeSpl = inlIf[1].split(Pattern.quote(Script.STORE));
+			storeSpl = Script.syntaxedSplit(inlIf[1], Script.STORE);
 		}
 		else
 		{
 			inlineIf = null;
-			storeSpl = firstToken.split(Pattern.quote(Script.STORE));
+			storeSpl = Script.syntaxedSplit(firstToken, Script.STORE);
 		}
 		storing = new String[storeSpl.length - 1];
 		for (int i = 1; i < storeSpl.length; i++)
