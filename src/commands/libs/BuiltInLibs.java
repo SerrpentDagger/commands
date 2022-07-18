@@ -8,6 +8,7 @@ public class BuiltInLibs
 {
 	public static void load()
 	{
+		Script.expose(Object.class, false);
 		Script.add("Math", () -> Script.expose(Math.class, true));
 		Script.add("Random", () -> Script.expose(Random.class, true));
 	}

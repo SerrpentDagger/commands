@@ -161,21 +161,6 @@ public abstract class CmdArg<T>
 	
 	///////////////////////
 	
-	public static final CmdArg<Command> COMMAND = new CmdArg<Command>("Command", Command.class)
-	{
-		@Override
-		public Command parse(String trimmed)
-		{
-			return Script.getCommand(new CmdHead(trimmed));
-		}
-		
-		@Override
-		public String unparse(Command obj)
-		{
-			return obj.name;
-		};
-	}.reg();
-	
 	public static final CmdArg<Library> LIBRARY = new CmdArg<Library>("Library", Library.class)
 	{
 		@Override

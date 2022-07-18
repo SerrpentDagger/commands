@@ -10,6 +10,7 @@ import java.util.Map.Entry;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import commands.Script.CommandParseException;
+import mod.serpentdagger.artificialartificing.utils.group.MixedPair;
 import utilities.StringUtils;
 
 public class ScriptObject<T>
@@ -134,6 +135,25 @@ public class ScriptObject<T>
 		return sub;
 	}
 	
+	public static <SUP, SUB extends SUP> ScriptObject<SUB> makeSub(ScriptObject<SUB> sub, ScriptObject<SUP> sup)
+	{
+		sup.subs.add(sub);
+		return sub;
+	}
+	
+	public static <SUP> ScriptObject<SUP> makeSup(ScriptObject<SUP> sup, ScriptObject<? extends SUP>[] subs)
+	{
+		for (ScriptObject<? extends SUP> ext : subs)
+			sup.subs.add(ext);
+		return sup;
+	}
+	
+	@SuppressWarnings("unchecked")
+	public static <SUP, SUB extends SUP> MixedPair<ScriptObject<SUP>, ScriptObject<SUB>> castHirearchy(ScriptObject<?> sup, ScriptObject<?> sub)
+	{
+		return new MixedPair<>((ScriptObject<SUP>) sup, (ScriptObject<SUB>) sub);
+	}
+	
 	///////////////////////////
 	
 	public Command add(String name, String ret, String desc, CmdArg<?>... args)
@@ -238,9 +258,24 @@ public class ScriptObject<T>
 	{
 		String inf = this.getTypeName() + " | Inline formats: '";
 		inf += cmdArg.getInfoString();
-		inf += StringUtils.toString(inlineConst, (arg) -> arg.getInfoString(), "', '", "', '", "'");
+		inf += inlineConst.length > 0 ? StringUtils.toString(inlineConst, (arg) -> arg.getInfoString(), "', '", "', '", "'") : "'";
 		inf += ", Desc: " + this.getDescription();
 		return inf;
+	}
+	
+	public String hirearchyString()
+	{
+		return hirearchyString(0);
+	}
+	private String hirearchyString(int level)
+	{
+		String str = StringUtils.mult("   ", level) + "~ " +  getInfoString();
+		if (subs.isEmpty())
+			return str;
+		Iterator<ScriptObject<? extends T>> it = subs.iterator();
+		while (it.hasNext())
+			str += "\n" + it.next().hirearchyString(level + 1);
+		return str;
 	}
 	
 	public CmdArg<T> argOf()

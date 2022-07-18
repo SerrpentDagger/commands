@@ -43,6 +43,7 @@ import commands.ParseTracker.RepeatTracker;
 import commands.ParseTracker.WrapTracker;
 import commands.Scope.SNode;
 import commands.libs.BuiltInLibs;
+import mod.serpentdagger.artificialartificing.utils.group.MixedPair;
 import utilities.ArrayUtils;
 import utilities.StringUtils;
 
@@ -166,32 +167,32 @@ public class Script
 	{
 		return Character.toUpperCase(toUpper.charAt(0)) + toUpper.substring(1);
 	}
-	private static <T> CmdArg<T> getArgFor(Class<T> cl, ExpPredicate filter, boolean recursive)
+	private static <T> CmdArg<T> getArgFor(Class<T> cl, ExpPredicate filter, ClsPredicate clFilter, boolean recursive)
 	{
 		CmdArg<T> out = CmdArg.getArgFor(cl);
 		if (out == null && recursive)
-			return expose(cl, filter, recursive).argOf();
+			return expose(cl, filter, clFilter, recursive).argOf();
 		return out;
 	}
-	private static <T> TypeArg<T> getTypeArgFor(Class<T> cl, ExpPredicate filter, boolean recursive)
+	private static <T> TypeArg<T> getTypeArgFor(Class<T> cl, ExpPredicate filter, ClsPredicate clFilter, boolean recursive)
 	{
 		TypeArg<T> out = CmdArg.getTypeArgFor(cl);
 		if (out.arg == null && recursive)
 		{
-			expose(cl, filter, recursive);
+			expose(cl, filter, clFilter, recursive);
 			return CmdArg.getTypeArgFor(cl);
 		}
 		return out;
 	}
 	
-	private static Command[] expose(Member m, ScriptObject<?> to, ExpPredicate filter, boolean recursive)
+	private static Command[] expose(Member m, ScriptObject<?> to, ExpPredicate filter, ClsPredicate clFilter, boolean recursive)
 	{
 		if (m instanceof Executable)
-			return new Command[] { expose((Executable) m, to, filter, recursive) };
+			return new Command[] { expose((Executable) m, to, filter, clFilter, recursive) };
 		else
-			return exposeGetterSetterFor((Field) m, to, filter, recursive);
+			return exposeGetterSetterFor((Field) m, to, filter, clFilter, recursive);
 	}
-	private static Command[] exposeGetterSetterFor(Field f, ScriptObject<?> to, ExpPredicate filter, boolean recursive)
+	private static Command[] exposeGetterSetterFor(Field f, ScriptObject<?> to, ExpPredicate filter, ClsPredicate clFilter, boolean recursive)
 	{
 		String fieldName = f.getName();
 		String displayName = f.getDeclaringClass().getCanonicalName() + "." + fieldName;
@@ -207,9 +208,9 @@ public class Script
 		String sName = uniqueName("set" + upperFirstChar(fieldName), map);
 		
 		Class<?> type = f.getType();
-		TypeArg<?> typeArg = getTypeArgFor(type, filter, recursive);
+		TypeArg<?> typeArg = getTypeArgFor(type, filter, clFilter, recursive);
 		Class<?> declType = f.getDeclaringClass();
-		CmdArg<?> declArg = getArgFor(declType, filter, recursive);
+		CmdArg<?> declArg = getArgFor(declType, filter, clFilter, recursive);
 		
 		if (typeArg.arg == null)
 			throw new IllegalStateException("Unable to automatically expose field '" + displayName + "' due to lack of registered"
@@ -274,8 +275,8 @@ public class Script
 		return out;
 	}
 	
-	public static Command expose(Executable e) { return expose(e, null, SAFE_EXPOSE_FILTER, false); }
-	private static Command expose(Executable e, ScriptObject<?> to, ExpPredicate filter, boolean recursive)
+	public static Command expose(Executable e) { return expose(e, null, SAFE_EXPOSE_FILTER, SAFE_CLASS_EXPOSE_FILTER, false); }
+	private static Command expose(Executable e, ScriptObject<?> to, ExpPredicate filter, ClsPredicate clFilter, boolean recursive)
 	{
 		boolean isM = e instanceof Method;
 		final Method m = isM ? (Method) e : null;
@@ -304,7 +305,7 @@ public class Script
 		CmdArg<?>[] args = new CmdArg<?>[types.length];
 		for (int i = 0; i < types.length; i++)
 		{
-			args[i] = getArgFor(types[i], filter, recursive);
+			args[i] = getArgFor(types[i], filter, clFilter, recursive);
 			if (args[i] == null)
 				throw new IllegalStateException("Unable to automatically expose method '" + displayName + "' due to lack of registered"
 						+ " CmdArg for class: " + types[i].getCanonicalName());
@@ -313,7 +314,7 @@ public class Script
 		Class<?> retType = isM ? m.getReturnType() : c.getDeclaringClass();
 		if (retType.isPrimitive())
 			retType = CmdArg.wrap(retType);
-		TypeArg<?> retTypeArg = getTypeArgFor(retType, filter, recursive);
+		TypeArg<?> retTypeArg = getTypeArgFor(retType, filter, clFilter, recursive);
 		boolean isVoid = retType.equals(Void.TYPE);
 		
 		if (retTypeArg.arg == null)
@@ -378,30 +379,47 @@ public class Script
 	public static final ExpPredicate SAFE_EXPOSE_FILTER = (ex, rec) ->
 	{
 		int mods = ex.getModifiers();
-		return !Modifier.isPrivate(mods)
-				&& !Modifier.isProtected(mods)
+		return Modifier.isPublic(mods)
 				&& !ex.isSynthetic()
 				&& Script.canAutoExpose(ex, rec);
 	};
+	public static final ClsPredicate SAFE_CLASS_EXPOSE_FILTER = (cl, rec) ->
+	{
+		int mods = cl.getModifiers();
+		return Modifier.isPublic(mods)
+				&& !cl.isAnonymousClass()
+				&& !cl.isHidden()
+				&& !cl.isLocalClass()
+				&& cl.getSuperclass() != null;
+	};
 	public static Command[] exposeAll(Member[] members, ScriptObject<?> to, ExpPredicate iff)
 	{
-		return exposeAll(members, to, iff, false);
+		return exposeAll(members, to, iff, SAFE_CLASS_EXPOSE_FILTER, false);
 	}
-	public static Command[] exposeAll(Member[] members, ScriptObject<?> to, ExpPredicate iff, boolean recursive)
+	public static Command[] exposeAll(Member[] members, ScriptObject<?> to, ExpPredicate iff, ClsPredicate clIf, boolean recursive)
 	{
 		Arrays.sort(members, (a, b) -> String.CASE_INSENSITIVE_ORDER.compare(getSortingName(a), getSortingName(b)));
 		ArrayList<Command> out = new ArrayList<>();
 		for (Member m : members)
 			if (iff.test(m, recursive))
-				out.addAll(Arrays.asList(expose(m, to, iff, recursive)));
+				out.addAll(Arrays.asList(expose(m, to, iff, clIf, recursive)));
 		return out.toArray(new Command[out.size()]);
+	}
+	public static ScriptObject<?>[] exposeAll(Class<?>[] classes, ClsPredicate iff, ExpPredicate memberIf, boolean recursive)
+	{
+		Arrays.sort(classes, (a, b) -> String.CASE_INSENSITIVE_ORDER.compare(a.getCanonicalName(), b.getCanonicalName()));
+		ArrayList<ScriptObject<?>> out = new ArrayList<>();
+		for (Class<?> cl : classes)
+			if (iff.test(cl, recursive))
+				out.add(expose(cl, memberIf, iff, recursive));
+		return out.toArray(new ScriptObject<?>[out.size()]);
 	}
 	public static <T> ScriptObject<T> expose(Class<T> cl, boolean recursive)
 	{
-		return expose(cl, SAFE_EXPOSE_FILTER, recursive);
+		return expose(cl, SAFE_EXPOSE_FILTER, SAFE_CLASS_EXPOSE_FILTER, recursive);
 	}
 	@SuppressWarnings("unchecked")
-	public static <T> ScriptObject<T> expose(Class<T> cl, ExpPredicate memberIf, boolean recursive)
+	public static <T> ScriptObject<T> expose(Class<T> cl, ExpPredicate memberIf, ClsPredicate classIf, boolean recursive)
 	{
 		String desired = cl.getSimpleName();
 		String name = desired;
@@ -419,10 +437,23 @@ public class Script
 		ScriptObject<T> so = new ScriptObject<>(name, desc, cl);
 		Script.add(so);
 		so.argOf().reg();
+		if (recursive)
+		{
+			ScriptObject<?> sub = so;
+			Class<?> subCl = cl;
+			exposeAll(subCl.getClasses(), classIf, memberIf, recursive);
+			exposeAll(subCl.getInterfaces(), classIf, memberIf, recursive);
+			Class<?> sup = cl.getSuperclass();
+			if (sup != null && (sup == Object.class || classIf.test(sup, recursive)))
+			{
+				MixedPair<ScriptObject<Object>, ScriptObject<Object>> supSub = ScriptObject.castHirearchy(expose(sup, memberIf, classIf, recursive), sub);
+				ScriptObject.makeSub(supSub.b(), supSub.a());
+			}
+		}
 		
-		Script.exposeAll(cl.getConstructors(), so, memberIf, recursive);
-		Script.exposeAll(cl.getMethods(), so, memberIf, recursive);
-		Script.exposeAll(cl.getFields(), so, memberIf, recursive);
+		Script.exposeAll(cl.getConstructors(), so, memberIf, classIf, recursive);
+		Script.exposeAll(cl.getMethods(), so, memberIf, classIf, recursive);
+		Script.exposeAll(cl.getFields(), so, memberIf, classIf, recursive);
 
 		return so;
 	}
@@ -761,6 +792,8 @@ public class Script
 		CMDS.values().forEach((cmd) -> ctx.printCallback.accept("   " + cmd.getInfoString()));
 		ctx.printCallback.accept("--- Types ---");
 		OBJECTS.values().forEach((obj) -> ctx.printCallback.accept("   " + obj.getInfoString()));
+		ctx.printCallback.accept("--- Object Hirearchy ---");
+		ctx.printCallback.accept(OBJECTS.get("Object").hirearchyString());
 		ctx.printCallback.accept("--- Libraries ---");
 		LIBS.values().forEach((lib) -> ctx.printCallback.accept("   " + lib.getInfoString()));
 		return ctx.prev();
@@ -917,6 +950,7 @@ public class Script
 			ctx.putVar(INDEX, "" + i);
 			ctx.runFrom(lab, (VarSet[]) objs[2]);
 		}
+		ctx.putVar(INDEX, "" + count);
 		return ctx.prev();
 	}).setVarArgs();
 	public static final Command WHILE = add("while", VOID, "While the boolean token (0) is true, excecutes the token label (1). Sets variables as provided before each run (2...).", CmdArg.TOKEN, CmdArg.TOKEN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
@@ -932,6 +966,7 @@ public class Script
 			ind++;
 			ctx.runFrom(lab, (VarSet[]) objs[2]);
 		}
+		ctx.putVar(INDEX, "" + ind);
 		return ctx.prev();
 	}).rawArg(0).setVarArgs();
 	public static final Command CALL = add("call", VOID, "Excecutes the given token label in a new stack entry. Sets variables to values provided.", CmdArg.TOKEN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
@@ -1233,6 +1268,12 @@ public class Script
 	public static interface ExpPredicate
 	{
 		public boolean test(Member e, boolean recursive);
+	}
+	
+	@FunctionalInterface
+	public static interface ClsPredicate
+	{
+		public boolean test(Class<?> cl, boolean recursive);
 	}
 	
 	/////////////////////////////////////////////
@@ -1912,7 +1953,7 @@ public class Script
 	private CommandResult runExecutable(String executableLine)
 	{
 		String line = executableTrim(executableLine);
-		if (line.startsWith(LABEL) || line.startsWith(SCOPED_LABEL))
+		if (line.isEmpty() || line.startsWith(LABEL) || line.startsWith(SCOPED_LABEL))
 			return new CommandResult(prev(), false);
 		String first = firstToken(line);
 		CmdHead head = new CmdHead(first);
@@ -1930,7 +1971,7 @@ public class Script
 					Command[] cmds = so.getMemberCommands();
 					for (int i = 0; i < cmds.length; i++)
 						str += "    " + cmds[i].getInfoString() + "\n";
-					printCallback.accept(so.getInfoString() + "\n  Cmds:\n" + str);
+					printCallback.accept("--- Type Hirearchy ---\n" + so.hirearchyString() + "\n--- Commands ---\n" + str);
 				}
 			}
 			else
@@ -1943,7 +1984,8 @@ public class Script
 				fur = valParse(CmdArg.INT, line, head.inlineFor);
 			for (int f = 0; f < fur; f++)
 			{
-				putVar(INDEX, "" + f);
+				if (head.isInlineFor)
+					putVar(INDEX, "" + f);
 				RunnableCommand cmd = parse(line, head);
 				if (cmd != null)
 				{
@@ -1960,6 +2002,8 @@ public class Script
 					return new CommandResult(prev(), true);
 				}
 			}
+			if (head.isInlineFor)
+				putVar(INDEX, "" + fur);
 		}
 		return new CommandResult(prev(), false);
 	}
@@ -1986,7 +2030,7 @@ public class Script
 		}
 	}
 	
-	public static Command getCommand(CmdHead head)
+	public Command getCommand(CmdHead head)
 	{
 		if (!head.isMemberCmd)
 			return CMDS.get(head.name);
