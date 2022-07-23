@@ -2,6 +2,8 @@ package commands;
 
 import java.util.regex.Matcher;
 
+import mod.serpentdagger.artificialartificing.utils.group.MixedPair;
+
 public class Label
 {
 	public final int line;
@@ -12,7 +14,8 @@ public class Label
 	{
 		isScoped = labelText.startsWith(Script.SCOPED_LABEL);
 		labelText = labelText.replaceFirst(Script.LABEL_REG, "").trim();
-		boolean[] labelMods = Script.prefixModsFrom(labelText, Script.VALID_LABEL_MODS);
+		MixedPair<boolean[], String> labelModsModless = Script.prefixModsFrom(labelText, Script.VALID_LABEL_MODS);
+		boolean[] labelMods = labelModsModless.a();
 		isAccessible = labelMods[0];
 		getsAccess = labelMods[1];
 		Matcher match = Script.LABEL_MODS_PATTERN.matcher(labelText);

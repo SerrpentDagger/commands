@@ -41,7 +41,7 @@ public class ScriptObject<T>
 		cmdArg = new CmdArg<T>(typeName, cl)
 		{
 			@Override
-			public T parse(String trimmed)
+			public T parse(String trimmed, String[] tokens, Script ctx)
 			{
 				lastParsedType = tmp;
 				T obj = objs.get(trimmed), old = null;
@@ -76,7 +76,7 @@ public class ScriptObject<T>
 				objs.put(name, obj);
 				return name;
 			};
-		}.reg("auto");
+		}.reg();
 	}
 	
 	public String newObjKey()
@@ -197,10 +197,9 @@ public class ScriptObject<T>
 			}
 			
 			@Override
-			public T parse(String trimmed)
+			public T parse(String trimmed, String[] tokens, Script ctx)
 			{
 				Object[] objs = new Object[args.length];
-				String[] tokens = Script.tokensOf(trimmed);
 				int t = 0;
 				for (int a = 0; a < args.length; a++)
 				{

@@ -3,7 +3,6 @@ package commands.libs;
 import java.util.Random;
 
 import commands.CmdArg;
-import commands.CmdString;
 import commands.Script;
 import commands.ScriptObject;
 
@@ -23,7 +22,7 @@ public class BuiltInLibs
 		
 		ScriptObject<Str> str = Script.expose(Str.class, true);
 		str.setDescription("A simple container for Strings that can be stored in Java objects like ArrayLists.");
-		str.add((objs) -> new Str(((CmdString) objs[0]).unraw), CmdArg.STRING);
+		str.add((objs) -> new Str(((String) objs[0])), CmdArg.STRING);
 		
 		Script.add("Math", () -> Script.expose(Math.class, true));
 		Script.add("Random", () -> Script.expose(Random.class, true));

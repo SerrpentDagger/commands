@@ -57,7 +57,7 @@ public abstract class CmdArg<T>
 				CmdArg<?> componentArg = getArgFor(cls.componentType());
 				if (componentArg == null)
 					return null;
-				return (CmdArg<T>) arrayOf(componentArg).reg();
+				return (CmdArg<T>) arrayOf(componentArg);
 			}
 			else if (cls.isPrimitive())
 			{
@@ -124,34 +124,28 @@ public abstract class CmdArg<T>
 	}
 	public String getRegId() { return regId; }
 	
-	public abstract T parse(String trimmed);
-	public T parse(String[] tokens, int off)
+	public abstract T parse(String trimmed, String[] tokens, Script ctx);
+	public T parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
+	{
+		return parse(tokens, off, ctx);
+	}
+	public T parse(String[] tokens, int off, Script ctx)
 	{
 		String str = "";
 		int count = tokenCount();
-		if (count > 0)
+		String[] toks = new String[count];
+		for (int i = 0; i < count; i++)
 		{
-			for (int i = 0; i < tokenCount(); i++)
-			{
-				str += tokens[off + i] + " ";
-			}
+			str += tokens[off + i] + " ";
+			toks[i] = tokens[off + i];
 		}
-		else if (count == -1)
-		{
-			int arrCount = 0;
-			for (int i = off; i < tokens.length && (i == off || arrCount > 0); i++)
-			{
-				arrCount += Script.arrPreFrom(tokens[i]).length();
-				arrCount -= Script.arrPostFrom(tokens[i]).length();
-				str += tokens[i];
-			}
-		}
-		else if (count == -2)
-		{
-			for (int i = off; i < tokens.length; i++)
-				str += tokens[i] + " ";
-		}
-		return parse(str.trim());
+		return parse(str.trim(), toks, ctx);
+	}
+	public T parse(String trimmed)
+	{
+		if (tokenCount() > 1)
+			throw new IllegalStateException("Attempt to parse multitoken arg without providing token array.");
+		return parse(trimmed, null, null);
 	}
 	
 	public String unparse(T obj)
@@ -159,12 +153,54 @@ public abstract class CmdArg<T>
 		return obj.toString();
 	}
 	
-	///////////////////////
+	/////////////////////////
+	
+	public static abstract class VarCmdArg<T> extends CmdArg<T>
+	{
+		public VarCmdArg(String type, Class<T> cls)
+		{
+			super(type, cls);
+		}
+
+		@Override
+		public String getInfoString()
+		{
+			return super.getInfoString() + "*";
+		}
+		
+		@Override
+		public T parse(String trimmed, String[] tokens, Script ctx)
+		{
+			throw new UnsupportedOperationException("This VarCmdArg cannot parse without access to the ScajlVariable sources.");
+		}
+		
+		@Override
+		public abstract T parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx);
+		
+		@Override
+		public VarCmdArg<T> reg()
+		{
+			return (VarCmdArg<T>) super.reg();
+		}
+		@Override
+		public VarCmdArg<T> reg(int i)
+		{
+			return (VarCmdArg<T>) super.reg(i);
+		}
+		@Override
+		public VarCmdArg<T> reg(String regId)
+		{
+			return (VarCmdArg<T>) super.reg(regId);
+		}
+	}
+	
+	////////////////////////////////////////////////////////////////////////////////////////////////
+	////////////////////////////////////////////////////////////////////////////////////////////////
 	
 	public static final CmdArg<Library> LIBRARY = new CmdArg<Library>("Library", Library.class)
 	{
 		@Override
-		public Library parse(String trimmed)
+		public Library parse(String trimmed, String[] tokens, Script ctx)
 		{
 			return Script.getLibrary(trimmed);
 		}	
@@ -179,9 +215,8 @@ public abstract class CmdArg<T>
 		}
 		
 		@Override
-		public Object parse(String trimmed)
+		public Object parse(String trimmed, String[] tokens, Script ctx)
 		{
-			String[] tokens = Script.tokensOf(trimmed);
 			if (!Script.isType(tokens[1]))
 				return null;
 			ScriptObject<?> so = Script.getType(tokens[1]);
@@ -207,13 +242,12 @@ public abstract class CmdArg<T>
 		}
 		
 		@Override
-		public Color parse(String trimmed)
+		public Color parse(String trimmed, String[] tokens, Script ctx)
 		{
 			Double r, g, b;
-			String[] tokens = Script.tokensOf(trimmed);
-			r = DOUBLE.parse(tokens, 0);
-			g = DOUBLE.parse(tokens, 1);
-			b = DOUBLE.parse(tokens, 2);
+			r = DOUBLE.parse(tokens, 0, ctx);
+			g = DOUBLE.parse(tokens, 1, ctx);
+			b = DOUBLE.parse(tokens, 2, ctx);
 			if (r == null || g == null || b == null)
 				return null;
 			return new Color(r.floatValue(), g.floatValue(), b.floatValue());
@@ -229,7 +263,7 @@ public abstract class CmdArg<T>
 	public static final CmdArg<Long> LONG = new CmdArg<Long>("Long", Long.class)
 	{
 		@Override
-		public Long parse(String trimmed)
+		public Long parse(String trimmed, String[] tokens, Script ctx)
 		{
 			try
 			{
@@ -244,7 +278,7 @@ public abstract class CmdArg<T>
 	public static final CmdArg<Integer> INT = new CmdArg<Integer>("Integer", Integer.class)
 	{
 		@Override
-		public Integer parse(String trimmed)
+		public Integer parse(String trimmed, String[] tokens, Script ctx)
 		{
 			try
 			{
@@ -259,9 +293,9 @@ public abstract class CmdArg<T>
 	public static final CmdArg<Byte> BYTE = new CmdArg<Byte>("Byte", Byte.class)
 	{
 		@Override
-		public Byte parse(String trimmed)
+		public Byte parse(String trimmed, String[] tokens, Script ctx)
 		{
-			Integer i = INT.parse(trimmed);
+			Integer i = INT.parse(trimmed, tokens, ctx);
 			return i == null ? null : (byte) (int) i;
 		}
 	}.reg();
@@ -269,9 +303,9 @@ public abstract class CmdArg<T>
 	public static final CmdArg<Short> SHORT = new CmdArg<Short>("Short", Short.class)
 	{
 		@Override
-		public Short parse(String trimmed)
+		public Short parse(String trimmed, String[] tokens, Script ctx)
 		{
-			Integer i = INT.parse(trimmed);
+			Integer i = INT.parse(trimmed, tokens, ctx);
 			return i == null ? null : (short) (int) i;
 		}
 	}.reg();
@@ -279,9 +313,9 @@ public abstract class CmdArg<T>
 	public static final CmdArg<Double> DOUBLE_POSITIVE = new CmdArg<Double>("PositiveDouble", Double.class)
 	{
 		@Override
-		public Double parse(String trimmed)
+		public Double parse(String trimmed, String[] tokens, Script ctx)
 		{
-			Double doub = DOUBLE.parse(trimmed);
+			Double doub = DOUBLE.parse(trimmed, tokens, ctx);
 			if (doub != null && doub >= 0)
 				return doub;
 			return null;
@@ -291,7 +325,7 @@ public abstract class CmdArg<T>
 	public static final CmdArg<Double> DOUBLE = new CmdArg<Double>("Double", Double.class)
 	{	
 		@Override
-		public Double parse(String trimmed)
+		public Double parse(String trimmed, String[] tokens, Script ctx)
 		{
 			try
 			{
@@ -312,24 +346,23 @@ public abstract class CmdArg<T>
 		}
 		
 		@Override
-		public Double parse(String trimmed)
+		public Double parse(String trimmed, String[] tokens, Script ctx)
 		{
-			String[] tokens = Script.tokensOf(trimmed);
-			Double a = DOUBLE.parse(tokens[0]);
-			Double b = DOUBLE.parse(tokens[2]);
+			Double a = DOUBLE.parse(tokens, 0, ctx);
+			Double b = DOUBLE.parse(tokens, 2, ctx);
 			Oper op = DoubleExp.Oper.parse(tokens[1]);
 			if (ArrayUtils.contains(ArrayUtils.of(a, b, op), null))
 				return null;
 			return op.eval(a, b);
 		}
-	}.reg(1);
+	}.reg("expression");
 	
 	public static final CmdArg<Float> FLOAT = new CmdArg<Float>("Float", Float.class)
 	{	
 		@Override
-		public Float parse(String trimmed)
+		public Float parse(String trimmed, String[] tokens, Script ctx)
 		{
-			Double d = DOUBLE.parse(trimmed);
+			Double d = DOUBLE.parse(trimmed, tokens, ctx);
 			return d == null ? null : (float) (double) d;
 		}
 	}.reg();
@@ -337,30 +370,31 @@ public abstract class CmdArg<T>
 	public static final CmdArg<Character> CHARACTER = new CmdArg<Character>("Character", Character.class)
 	{
 		@Override
-		public Character parse(String trimmed)
+		public Character parse(String trimmed, String[] tokens, Script ctx)
 		{
-			CmdString str = new CmdString(trimmed);
-			if (str.unraw.length() > 1)
+			if (trimmed.length() > 1)
 				return null;
-			return str.unraw.charAt(0);
+			return trimmed.charAt(0);
 		}
 	}.reg();
 	
 	public static final CmdArg<String> TOKEN = new CmdArg<String>("Token", String.class)
 	{
 		@Override
-		public String parse(String trimmed)
+		public String parse(String trimmed, String[] tokens, Script ctx)
 		{
-			return trimmed;
+			if (tokens.length > 1)
+				return null;
+			return tokens[0];
 		}
 	};
 	
 	public static final CmdArg<String> TYPE = new CmdArg<String>("Type", String.class)
 	{
 		@Override
-		public String parse(String trimmed)
+		public String parse(String trimmed, String[] tokens, Script ctx)
 		{
-			String type = TOKEN.parse(trimmed);
+			String type = TOKEN.parse(trimmed, tokens, ctx);
 			if (Script.isType(type))
 				return type;
 			return null;
@@ -377,9 +411,8 @@ public abstract class CmdArg<T>
 		}
 		
 		@Override
-		public ObjectType<?> parse(String trimmed)
+		public ObjectType<?> parse(String trimmed, String[] tokens, Script ctx)
 		{
-			String[] tokens = Script.tokensOf(trimmed);
 			if (!Script.isType(tokens[1]))
 				return null;
 			ScriptObject<?> so = Script.getType(tokens[1]);
@@ -387,40 +420,25 @@ public abstract class CmdArg<T>
 		}
 	};
 	
-	public static final CmdArg<CmdString> STRING = new CmdArg<CmdString>("String", CmdString.class)
+	public static final CmdArg<String> STRING = new CmdArg<String>("String", String.class)
 	{
 		@Override
-		public CmdString parse(String trimmed)
+		public String parse(String trimmed, String[] tokens, Script ctx)
 		{
-			return new CmdString(trimmed);
-		}
-		
-		@Override
-		public String unparse(CmdString obj)
-		{
-			return obj.raw;
-		};
-	}.reg();
-	
-	public static final CmdArg<String> EXPOSED_STRING = new CmdArg<String>("String", String.class)
-	{
-		@Override
-		public String parse(String trimmed)
-		{
-			return STRING.parse(trimmed).unraw;
+			return trimmed;
 		}
 		
 		@Override
 		public String unparse(String obj)
 		{
-			return obj;
-		}
+			return Script.STRING_CHAR + obj + Script.STRING_CHAR;
+		};
 	}.reg();
 	
 	public static final CmdArg<Boolean> BOOLEAN = new CmdArg<Boolean>("Boolean", Boolean.class)
 	{
 		@Override
-		public Boolean parse(String trimmed)
+		public Boolean parse(String trimmed, String[] tokens, Script ctx)
 		{
 			switch (trimmed)
 			{
@@ -443,10 +461,9 @@ public abstract class CmdArg<T>
 		}
 		
 		@Override
-		public BooleanThen parse(String trimmed)
+		public BooleanThen parse(String trimmed, String[] tokens, Script ctx)
 		{
-			String[] tokens = Script.tokensOf(trimmed);
-			BooleanThen b = new BooleanThen(BOOLEAN.parse(tokens, 0), TOKEN.parse(tokens, 1));
+			BooleanThen b = new BooleanThen(BOOLEAN.parse(tokens, 0, ctx), TOKEN.parse(tokens, 1, ctx));
 			return b;
 		}
 		
@@ -466,11 +483,10 @@ public abstract class CmdArg<T>
 		}
 		
 		@Override
-		public BooleanExp parse(String trimmed)
+		public BooleanExp parse(String trimmed, String[] tokens, Script ctx)
 		{
 			try
 			{
-				String[] tokens = Script.tokensOf(trimmed);
 				double a = Double.parseDouble(tokens[0]);
 				Comp comp = Comp.parse(tokens[1].toUpperCase());
 				if (comp == null)
@@ -490,7 +506,7 @@ public abstract class CmdArg<T>
 		};
 	}.reg();
 	
-	public static final CmdArg<VarSet> VAR_SET = new CmdArg<VarSet>("VarName Value", VarSet.class)
+	public static final VarCmdArg<VarSet> VAR_SET = new VarCmdArg<VarSet>("VarName Value", VarSet.class)
 	{
 		@Override
 		public boolean rawToken(int ind)
@@ -505,13 +521,12 @@ public abstract class CmdArg<T>
 		}
 		
 		@Override
-		public VarSet parse(String trimmed)
+		public VarSet parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
 		{
 			String v;
-			CmdString s;
-			String[] tokens = Script.tokensOf(trimmed);
-			v = TOKEN.parse(tokens, 0);
-			s = STRING.parse(tokens, 1);
+			ScajlVariable s;
+			v = TOKEN.parse(tokens, off, ctx);
+			s = vars[off + 1];
 			if (v == null || s == null)
 				return null;
 			return new VarSet(v, s);
@@ -520,11 +535,11 @@ public abstract class CmdArg<T>
 		@Override
 		public String unparse(VarSet obj)
 		{
-			return Script.tokenize(obj.var, obj.set.raw);
+			return Script.tokenize(obj.var, obj.set.raw());
 		};
 	}.reg();
 	
-	public static final CmdArg<BoolVarSet> BOOL_VAR_SET = new CmdArg<BoolVarSet>("Boolean VarName Value", BoolVarSet.class)
+	public static final VarCmdArg<BoolVarSet> BOOL_VAR_SET = new VarCmdArg<BoolVarSet>("Boolean VarName Value", BoolVarSet.class)
 	{
 		@Override
 		public boolean rawToken(int ind)
@@ -539,15 +554,14 @@ public abstract class CmdArg<T>
 		}
 		
 		@Override
-		public BoolVarSet parse(String trimmed)
+		public BoolVarSet parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
 		{
 			Boolean b;
 			String v;
-			CmdString s;
-			String[] tokens = Script.tokensOf(trimmed);
-			b = BOOLEAN.parse(tokens, 0);
-			v = TOKEN.parse(tokens, 1);
-			s = STRING.parse(tokens, 2);
+			ScajlVariable s;
+			b = BOOLEAN.parse(tokens, off, ctx);
+			v = TOKEN.parse(tokens, off + 1, ctx);
+			s = vars[off + 1];
 			if (b == null || v == null || s == null)
 				return null;
 			return new BoolVarSet(b, v, s);
@@ -556,11 +570,11 @@ public abstract class CmdArg<T>
 		@Override
 		public String unparse(BoolVarSet obj)
 		{
-			return Script.tokenize("" + obj.bool, obj.var, obj.set.raw);
-		};
+			return Script.tokenize("" + obj.bool, obj.var, obj.set.raw());
+		}
 	}.reg();
 	
-	public static final CmdArg<IntVarSet> INT_VAR_SET = new CmdArg<IntVarSet>("Integer VarName Value", IntVarSet.class)
+	public static final VarCmdArg<IntVarSet> INT_VAR_SET = new VarCmdArg<IntVarSet>("Integer VarName Value", IntVarSet.class)
 	{
 		@Override
 		public boolean rawToken(int ind)
@@ -575,15 +589,14 @@ public abstract class CmdArg<T>
 		}
 		
 		@Override
-		public IntVarSet parse(String trimmed)
+		public IntVarSet parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
 		{
 			Integer i;
 			String v;
-			CmdString s;
-			String[] tokens = Script.tokensOf(trimmed);
-			i = INT.parse(tokens, 0);
-			v = TOKEN.parse(tokens, 1);
-			s = STRING.parse(tokens, 2);
+			ScajlVariable s;
+			i = INT.parse(tokens, off, ctx);
+			v = TOKEN.parse(tokens, off + 1, ctx);
+			s = vars[off + 2];
 			if (i == null || v == null || s == null)
 				return null;
 			return new IntVarSet(i, v, s);
@@ -592,11 +605,11 @@ public abstract class CmdArg<T>
 		@Override
 		public String unparse(IntVarSet obj)
 		{
-			return Script.tokenize("" + obj.i, obj.var, obj.set.raw);
+			return Script.tokenize("" + obj.i, obj.var, obj.set.raw());
 		};
 	}.reg();
 
-	public static final CmdArg<IntVarSet> VAR_INT_SET = new CmdArg<IntVarSet>("VarName Integer Value", IntVarSet.class)
+	public static final VarCmdArg<IntVarSet> VAR_INT_SET = new VarCmdArg<IntVarSet>("VarName Integer Value", IntVarSet.class)
 	{
 		@Override
 		public boolean rawToken(int ind)
@@ -611,15 +624,14 @@ public abstract class CmdArg<T>
 		}
 		
 		@Override
-		public IntVarSet parse(String trimmed)
+		public IntVarSet parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
 		{
 			Integer i;
 			String v;
-			CmdString s;
-			String[] tokens = Script.tokensOf(trimmed);
-			v = TOKEN.parse(tokens, 0);
-			i = INT.parse(tokens, 1);
-			s = STRING.parse(tokens, 2);
+			ScajlVariable s;
+			v = TOKEN.parse(tokens, off, ctx);
+			i = INT.parse(tokens, off + 1, ctx);
+			s = vars[off + 2];
 			if (i == null || v == null || s == null)
 				return null;
 			return new IntVarSet(i, v, s);
@@ -628,9 +640,9 @@ public abstract class CmdArg<T>
 		@Override
 		public String unparse(IntVarSet obj)
 		{
-			return Script.tokenize(obj.var, "" + obj.i, obj.set.raw);
+			return Script.tokenize(obj.var, "" + obj.i, obj.set.raw());
 		};
-	}.reg(1);
+	};
 	
 	public static final CmdArg<VarIntTok> VAR_INT_TOK = new CmdArg<VarIntTok>("VarName Integer Token", VarIntTok.class)
 	{
@@ -647,15 +659,14 @@ public abstract class CmdArg<T>
 		}
 		
 		@Override
-		public VarIntTok parse(String trimmed)
+		public VarIntTok parse(String trimmed, String[] tokens, Script ctx)
 		{
 			String v;
 			Integer i;
 			String t;
-			String[] tokens = Script.tokensOf(trimmed);
-			v = TOKEN.parse(tokens, 0);
-			i = INT.parse(tokens, 1);
-			t = TOKEN.parse(tokens, 2);
+			v = TOKEN.parse(tokens, 0, ctx);
+			i = INT.parse(tokens, 1, ctx);
+			t = TOKEN.parse(tokens, 2, ctx);
 			if (i == null || v == null || t == null)
 				return null;
 			return new VarIntTok(v, i, t);
@@ -684,9 +695,9 @@ public abstract class CmdArg<T>
 		{
 			@SuppressWarnings("unchecked")
 			@Override
-			public X parse(String trimmed)
+			public X parse(String trimmed, String[] tokens, Script ctx)
 			{
-				Object obj = wrappedArg.parse(trimmed);
+				Object obj = wrappedArg.parse(trimmed, tokens, ctx);
 				if (obj == null)
 					return null;
 				return (X) obj;
@@ -703,14 +714,14 @@ public abstract class CmdArg<T>
 		CmdArg<X> array = new CmdArg<X>(Script.ARR_S + prim.getSimpleName() + Script.ARR_E, primArray)
 		{
 			@Override
-			public X parse(String trimmed)
+			public X parse(String trimmed, String[] tokns, Script ctx)
 			{
 				if (!trimmed.startsWith("" + Script.ARR_S) || !trimmed.endsWith("" + Script.ARR_E))
 					return null;
 				String[] tokens = Script.arrayElementsOf(trimmed);
 				X arr = (X) Array.newInstance(prim, tokens.length);
 				for (int i = 0; i < tokens.length; i++)
-					Array.set(arr, i, wrappedArg.parse(tokens[i].trim()));
+					Array.set(arr, i, wrappedArg.parse(tokens[i].trim(), null, ctx));
 				return arr;
 			}
 			
@@ -727,56 +738,56 @@ public abstract class CmdArg<T>
 		return array;
 	}
 	
+	@SuppressWarnings("unchecked")
 	public static <X> CmdArg<X[]> arrayOf(CmdArg<X> arg)
 	{
-		@SuppressWarnings("unchecked")
-		CmdArg<X[]> array = new CmdArg<X[]>(Script.ARR_S + arg.type + Script.ARR_E, (Class<X[]>) Array.newInstance(arg.cls, 0).getClass())
+		Class<X[]> arrClass = (Class<X[]>) Array.newInstance(arg.cls, 0).getClass();
+		LinkedHashMap<String, CmdArg<?>> arrayBin = ARGS.get(arrClass);
+		
+		CmdArg<X[]> array = arrayBin == null ? null : (CmdArg<X[]>) arrayBin.get("auto-arr");
+		if (array == null)
 		{
-			@Override
-			public X[] parse(String trimmed)
+			array = new CmdArg<X[]>(Script.ARR_S + arg.type + Script.ARR_E, arrClass)
 			{
-				if (!trimmed.startsWith("" + Script.ARR_S) || !trimmed.endsWith("" + Script.ARR_E))
-					return null;
-				String[] tokens = Script.arrayElementsOf(trimmed);
-				int count = arg.tokenCount();
-				if (tokens.length % count != 0)
-					return null;
-				
-				X first;
-				String trm = "";
-				for (int i = 0; i < count; i++)
-					trm += tokens[i] + " ";
-				first = arg.parse(trm.trim());
-				
-				if (first == null)
-					return null;
-				
-				int xLen = tokens.length / count;
-				@SuppressWarnings("unchecked")
-				X[] arr = (X[]) Array.newInstance(first.getClass(), xLen);
-				arr[0] = first;
-				for (int i = count; i < tokens.length; i += count)
+				//TODO: Array should be able to parse using differen CmdArgs.
+				@Override
+				public X[] parse(String trimmed, String[] tokens, Script ctx)
 				{
-					trm = "";
-					for (int j = i; j < i + count; j++)
-						trm += tokens[j] + " ";
-					X val = arg.parse(trm.trim());
-					if (val == null)
+					if (!trimmed.startsWith("" + Script.ARR_S) || !trimmed.endsWith("" + Script.ARR_E))
 						return null;
-					arr[i / count] = val;
+					int count = arg.tokenCount();
+					if (tokens.length % count != 0)
+						return null;
+					
+					X first;
+					first = arg.parse(tokens, 0, ctx);
+					
+					if (first == null)
+						return null;
+					
+					int xLen = tokens.length / count;
+					X[] arr = (X[]) Array.newInstance(first.getClass(), xLen);
+					arr[0] = first;
+					for (int i = count; i < tokens.length; i += count)
+					{
+						X val = arg.parse(tokens, i, ctx);
+						if (val == null)
+							return null;
+						arr[i / count] = val;
+					}
+					return arr;
 				}
-				return arr;
-			}
-			
-			@Override
-			public String unparse(X[] obj)
-			{
-				String[] elements = new String[obj.length];
-				for (int i = 0; i < obj.length; i++)
-					elements[i] = arg.unparse(obj[i]);
-				return Script.toArrayString(elements);
-			}
-		}.reg();
+				
+				@Override
+				public String unparse(X[] obj)
+				{
+					String[] elements = new String[obj.length];
+					for (int i = 0; i < obj.length; i++)
+						elements[i] = arg.unparse(obj[i]);
+					return Script.toArrayString(elements);
+				}
+			}.reg("auto-arr");
+		}
 		
 		return array;
 	}

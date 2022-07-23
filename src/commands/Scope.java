@@ -54,18 +54,18 @@ public class Scope
 		}
 	}
 	
-	public void put(String name, String val)
+	public void put(String name, ScajlVariable val)
 	{
 		last.put(name, val);
 	}
 	
 	public void makeGlobal(String name)
 	{
-		String was = last.vars.remove(name);
-		global.put(name, was == null ? Script.NULL : was);
+		ScajlVariable was = last.vars.remove(name);
+		global.put(name, was == null ? ScajlVariable.NULL : was);
 	}
 	
-	public String get(String name)
+	public ScajlVariable get(String name)
 	{
 		return last.get(name);
 	}
@@ -97,7 +97,7 @@ public class Scope
 	
 	protected class SNode
 	{
-		private final HashMap<String, String> vars = new HashMap<>();
+		private final HashMap<String, ScajlVariable> vars = new HashMap<>();
 		private final SNode parent;
 		private final Label label;
 		
@@ -107,7 +107,7 @@ public class Scope
 			this.label = label;
 		}
 		
-		protected void put(String name, String val)
+		protected void put(String name, ScajlVariable val)
 		{
 			SNode sn = this, old = this;
 			boolean contains = false, couldAccessOld = true;
@@ -129,9 +129,9 @@ public class Scope
 			vars.put(name, val);
 		}
 		
-		protected String get(String name)
+		protected ScajlVariable get(String name)
 		{
-			String out = vars.get(name);
+			ScajlVariable out = vars.get(name);
 			if (out == null && parent != null)
 				return parent.get(name);
 			return out;
@@ -142,6 +142,6 @@ public class Scope
 	
 	public static interface ScopeConsumer
 	{
-		public void accept(int level, Label label, String key, String val);
+		public void accept(int level, Label label, String key, ScajlVariable val);
 	}
 }

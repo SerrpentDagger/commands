@@ -30,10 +30,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.function.IntPredicate;
 import java.util.regex.Pattern;
 
 import arrays.AUtils;
+import arrays.AUtils.Ind;
 import commands.CmdArg.TypeArg;
+import commands.CmdArg.VarCmdArg;
 import commands.Command.CommandResult;
 import commands.Command.RunnableCommand;
 import commands.ParseTracker.BoxTracker;
@@ -41,6 +44,7 @@ import commands.ParseTracker.DelimTracker;
 import commands.ParseTracker.MultiTracker;
 import commands.ParseTracker.RepeatTracker;
 import commands.ParseTracker.WrapTracker;
+import commands.ScajlVariable.SVArray;
 import commands.Scope.SNode;
 import commands.libs.Bool;
 import commands.libs.BuiltInLibs;
@@ -77,6 +81,7 @@ public class Script
 	public static final String MEMBER_ACCESS = ".";
 	public static final char ARR_S = '[', ARR_E = ']', ARR_ACCESS = '.', ARR_SEP = ';';
 	public static final char TOK_S = '(', TOK_E = ')', SCOPE_S = '{', SCOPE_E = '}';
+	public static final char MAP_KEY_EQ = '=';
 	public static final String ARR_LEN = "len";
 	public static final char STRING_CHAR = '"';
 	public static final char ESCAPE_CHAR = '\\';
@@ -88,7 +93,9 @@ public class Script
 	public static final String INDEX = "INDEX";
 	public static final int NO_LABEL = -2;
 	public static final Label GLOBAL = new Label("GLOBAL", -1, false, true, false);
-	public static final char UNRAW = '%', RAW = '$', REF = '@';
+	public static final char UNRAW = '%', RAW = '$', REF = '@', RAW_CONTENTS = '&';
+	/** unraw, raw, ref, rcont */
+	public static final String[] VALID_VAR_MODS = new String[] { "" + UNRAW, "" + RAW, "" + REF, "" + RAW_CONTENTS };
 	
 	public static final String ILLEGAL_VAR_REG_EX = "[^\\w\\-]";
 	public static final Pattern ILLEGAL_VAR_MATCHER = Pattern.compile(ILLEGAL_VAR_REG_EX);
@@ -106,7 +113,7 @@ public class Script
 	////////////////
 	
 	public int parseLine = -1;
-	private final Scope scope = new Scope();
+	protected final Scope scope = new Scope();
 	private final HashMap<String, Label> labels = new HashMap<String, Label>();
 	private final ArrayDeque<StackEntry> stack = new ArrayDeque<StackEntry>();
 	private StackEntry popped = null;
@@ -570,7 +577,7 @@ public class Script
 	{
 		VarSet[] vars = (VarSet[]) objs[0];
 		for (VarSet var : vars)
-			ctx.putVar(var.var, var.set.raw);
+			ctx.putVar(var.var, var.set);
 		return ctx.prev();
 	}).setVarArgs();
 	public static final Command VAR_IF = add("var_if", VOID, "If the boolean is true, sets the variable to the value.", CmdArg.BOOL_VAR_SET).setFunc((ctx, objs) ->
@@ -578,7 +585,7 @@ public class Script
 		BoolVarSet[] vars = (BoolVarSet[]) objs[0];
 		for (BoolVarSet var : vars)
 			if (var.bool)
-				ctx.putVar(var.var, var.set.raw);
+				ctx.putVar(var.var, var.set);
 		return ctx.prev();
 	}).setVarArgs();
 	public static final Command VAR_IF_NOT = add("var_if_not", VOID, "If the boolean is false, sets the variable to the value.", CmdArg.BOOL_VAR_SET).setFunc((ctx, objs) ->
@@ -586,15 +593,15 @@ public class Script
 		BoolVarSet[] vars = (BoolVarSet[]) objs[0];
 		for (BoolVarSet var : vars)
 			if (!var.bool)
-				ctx.putVar(var.var, var.set.raw);
+				ctx.putVar(var.var, var.set);
 		return ctx.prev();
 	}).setVarArgs();
 	public static final Command VAR_IF_NOT_VAR = add("var_if_not_var", VOID, "Sets a variable to a value, if the variable does not already exist.", CmdArg.VAR_SET).setFunc((ctx, objs) ->
 	{
 		VarSet[] vars = (VarSet[]) objs[0];
 		for (VarSet var : vars)
-			if (ctx.getVar(var.var) == null)
-				ctx.putVar(var.var, var.set.raw);
+			if (!ScajlVariable.isVar(var.var, ctx))
+				ctx.putVar(var.var, var.set);
 		return ctx.prev();
 	}).setVarArgs();
 	public static final Command VAR_ARRAY = add("var_array", VOID, "Sets the variable to an array of the given length, filled with the given value.", CmdArg.VAR_INT_SET).setFunc((ctx, objs) ->
@@ -602,9 +609,10 @@ public class Script
 		IntVarSet[] sets = (IntVarSet[]) objs[0];
 		for (IntVarSet set : sets)
 		{
-			String[] s = new String[set.i];
-			Arrays.setAll(s, (i) -> set.set.unraw);
-			ctx.putVar(set.var, toArrayString(s));
+			ScajlVariable[] arr = new ScajlVariable[set.i];
+			Arrays.setAll(arr, (i) -> set.set.clone());
+			
+			ctx.putVar(set.var, new SVArray(set.var, arr));
 		}
 		
 		return ctx.prev();
@@ -619,40 +627,16 @@ public class Script
 			Label lab = ctx.getLabel(label);
 			if (lab == null)
 				ctx.parseExcept("Invalid label specification", label, "No label found.");
-			String[] elements = new String[count];
+			ScajlVariable[] elements = new ScajlVariable[count];
 			for (int i = 0; i < count; i++)
 			{
 				ctx.putVar(INDEX, "" + i);
 				ctx.runFrom(lab);
-				elements[i] = ctx.prev();
+				elements[i] = ctx.getVar(PREVIOUS, false);
 			}
-			ctx.putVar(set.var, toArrayString(elements));
+			ctx.putVar(INDEX, "" + count);
+			ctx.putVar(set.var, new SVArray(set.var, elements));
 		}
-		return ctx.prev();
-	}).setVarArgs();
-	public static final Command VAR_TO_INDEX = add("var_to_index", VOID, "Sets the value at an index in specified array.", CmdArg.VAR_INT_SET).setFunc((ctx, objs) ->
-	{
-		IntVarSet[] sets = (IntVarSet[]) objs[0];
-		
-		for (int i = 0; i < sets.length; i++)
-		{
-			String arr = sets[i].var;
-			if (!ctx.isArray(arr))
-				ctx.parseExcept("Attempt to set index value of non-array.", arr);
-			
-			String[] elements = arrayElementsOf(ctx.getVar(arr));
-			CmdString val = sets[i].set;
-			int index = sets[i].i;
-			if (index < 0)
-				elements = AUtils.extendPre(elements, -index, (ind) -> ind == 0 ? val.unraw : NULL);
-			else if (index >= elements.length)
-				elements = AUtils.extendPost(elements, 1 + index - elements.length, (ind) -> ind == index ? val.unraw : NULL);
-			else
-				elements[sets[i].i] = val.unraw;
-			
-			ctx.putVar(arr, toArrayString(elements));
-		}
-		
 		return ctx.prev();
 	}).setVarArgs();
 	public static final Command MAKE_GLOBAL = add("make_global", VOID, "Makes each variable token global in scope.", CmdArg.TOKEN).setFunc((ctx, objs) ->
@@ -667,7 +651,7 @@ public class Script
 	{
 		String[] vars = (String[]) objs[0];
 		for (String var : vars)
-			if (ctx.getVar(var) == null)
+			if (!ScajlVariable.isVar(var, ctx))
 				return FALSE;
 		return TRUE;
 	}).rawArg(0).setVarArgs();
@@ -676,23 +660,27 @@ public class Script
 		String[] vars = (String[]) objs[0];
 		for (String var : vars)
 		{
-			String val = ctx.getVar(var);
-			if (val == null || CmdArg.DOUBLE.parse(val) == null)
+			ScajlVariable val = ctx.getVar(var, false);
+			if (val == null || CmdArg.DOUBLE.parse(val.val(ctx)) == null)
 				return FALSE;
 		}
 		return TRUE;
 	}).rawArg(0).setVarArgs();
 	public static final Command IS_ARRAY = add("is_array", BOOL, "Checks whether or not the token is an array.", CmdArg.TOKEN).setFunc((ctx, objs) ->
 	{
-		String var = (String) objs[0];
-		if (!ctx.isArray(var))
-			return FALSE;
+		String[] vars = (String[]) objs[0];
+		for (String var : vars)
+			if (!(ScajlVariable.getVar(var, false, ctx) instanceof SVArray))
+				return FALSE;
 		return TRUE;
-	}).rawArg(0);
+	}).rawArg(0).setVarArgs();
 	public static final Command IS_TYPE = add("is_type", BOOL, "Checks whether or not the token represents a recognized type name.", CmdArg.TOKEN).setFunc((ctx, objs) ->
 	{
-		return "" + OBJECTS.containsKey(objs[0]);
-	});
+		for (String var : (String[]) objs[0])
+			if (!OBJECTS.containsKey(var))
+				return FALSE;
+		return TRUE;
+	}).setVarArgs();
 	public static final Command IS_OBJ = add("is_obj", BOOL, "Checks whether the token is a valid Object in the given Type.", CmdArg.TYPE, CmdArg.TOKEN).setFunc((ctx, objs) ->
 	{
 		String type = (String) objs[0];
@@ -770,12 +758,12 @@ public class Script
 	});
 	public static final Command PRINT = add("print", STRING, "Prints and returns the supplied value.", CmdArg.STRING).setFunc((ctx, objs) ->
 	{
-		CmdString[] strs = (CmdString[]) objs[0];
+		String[] strs = (String[]) objs[0];
 		String out = "";
-		for (CmdString str : strs)
-			out += str.unraw;
+		for (String str : strs)
+			out += str;
 		ctx.printCallback.accept(out);
-		return '"' + out + '"';
+		return CmdArg.STRING.unparse(out);
 	}).setVarArgs();
 	public static final Command PRINT_VARS = add("print_all_vars", VOID, "Prints all variables and their values.").setFunc((ctx, objs) ->
 	{
@@ -826,7 +814,7 @@ public class Script
 		});
 		return ctx.prev();
 	});
-	public static final Command KEY_IN = add("key_in", VALUE, "Fills the variables with user-keyboard-input.", CmdArg.TOKEN).setFunc((ctx, objs) ->
+	public static final Command KEY_IN = add("key_in", VOID, "Fills the variables with user-keyboard-input.", CmdArg.TOKEN).setFunc((ctx, objs) ->
 	{
 		String[] vars = (String[]) objs[0];
 		String next = NULL;
@@ -836,7 +824,7 @@ public class Script
 			next = ctx.keyIn.next();
 			ctx.putVar(var, next);
 		}
-		return next;
+		return ctx.prev();
 	}).rawArg(0).setVarArgs();
 	public static final Command USER_REQ = userReqType("user_req", CmdArg.STRING, "String");
 	public static final Command USER_REQ_INT = userReqType("user_req_int", CmdArg.INT, "integer");
@@ -847,20 +835,18 @@ public class Script
 	
 	public static final Command CONCAT = add("concat", STRING, "Concatinates and returns the argument Strings.", CmdArg.STRING).setFunc((ctx, objs) ->
 	{
-		String out = "\"";
-		for (CmdString tokArr : (CmdString[]) objs[0])
-		{
-			out += tokArr.unraw;
-		}
-		return out + "\"";
+		String out = "";
+		for (String tokArr : (String[]) objs[0])
+			out += tokArr;
+		return CmdArg.STRING.unparse(out);
 	}).setVarArgs();
 	public static final Command ARR_MERGE = add("merge_array", TOKEN_ARR, "Merges arrays one onto the other in the order provided.", CmdArg.arrayOf(CmdArg.STRING)).setFunc((ctx, objs) ->
 	{
 		String out = "" + ARR_S;
-		CmdString[][] arrays = (CmdString[][]) objs[0];
+		String[][] arrays = (String[][]) objs[0];
 		for (int i = 0; i < arrays.length; i++)
 			for (int j = 0; j < arrays[i].length; j++)
-				out += arrays[i][j].raw + (i == arrays.length - 1 && j == arrays[i].length - 1 ? "" : ARR_SEP + " ");
+				out += arrays[i][j] + (i == arrays.length - 1 && j == arrays[i].length - 1 ? "" : ARR_SEP + " ");
 		
 		return out + ARR_E;
 	}).setVarArgs();
@@ -932,10 +918,10 @@ public class Script
 	});
 	public static final Command STRING_MATCH = add("string_match", BOOL, "Returns true if the Strings match.", CmdArg.STRING).setFunc((ctx, objs) ->
 	{
-		CmdString[] strs = (CmdString[]) objs[0];
+		String[] strs = (String[]) objs[0];
 		boolean equal = true;
 		for (int i = 1; i < strs.length; i++)
-			equal = equal && strs[i].unraw.equals(strs[0].unraw);
+			equal = equal && strs[i].equals(strs[0]);
 		return "" + equal;
 	}).setVarArgs();
 	public static final Command IF_THEN_ELSE = add("if", TOKEN, "Iterates through the arguments, and returns the first token that has a true boolean, or null.", CmdArg.BOOLEAN_THEN).setFunc((ctx, objs) ->
@@ -988,17 +974,16 @@ public class Script
 			ctx.parseExcept("Invalid label specification", label, "No label found.");
 		
 		ctx.runFrom(lab, (VarSet[]) objs[1]);
-		// ctx.pushStack(line, true);
 		
 		return ctx.prev();
 	}).setVarArgs();
 	public static final Command GOTO = overload("goto", CALL, "No difference, but exists for temporary backwards compatibility.", (objs) -> objs, CALL.args).setVarArgs();
-	public static final Command RETURN = add("return", VOID, "Marks the end of a label or code section. If present, will set PREV to argument, or array of arguments if more than one is provided.", CmdArg.TOKEN).setFunc((ctx, objs) ->
+	public static final Command RETURN = add("return", "Value", "Marks the end of a label or code section. If present, will set PREV to argument, or array of arguments if more than one is provided.", CmdArg.TOKEN).setFunc((ctx, objs) ->
 	{
 		String[] rets = (String[]) objs[0];
 		SNode last = ctx.popStack();
 		if (rets.length == 0)
-			return last.get(PREVIOUS);
+			return last.get(PREVIOUS).raw();
 		else if (rets.length == 1)
 			return rets[0];
 		else
@@ -1024,12 +1009,16 @@ public class Script
 			return out;
 		}
 	}).setVarArgs();
+	public static final Command UNPACK = add("unpack", arrayReturnDispl(TOKEN), "Unpacks the given single token into its component tokens.", CmdArg.TOKEN).setFunc((ctx, objs) ->
+	{
+		return unpack((String) objs[0]);
+	});
 	public static final Command RUN_SCRIPT = add("run_script", Script.VOID, "Runs the given script. Booleans determine whether variables in this script will be given to other before being run, and whether variables in other will be pulled to this script once finished.", CmdArg.STRING, CmdArg.BOOLEAN, CmdArg.BOOLEAN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
 	{
-		CmdString name = (CmdString) objs[0];
-		File scr = getScriptFile(name.unraw);
+		String name = (String) objs[0];
+		File scr = getScriptFile(name);
 		if (scr == null)
-			ctx.parseExcept("Specified script does not exist", name.unraw);
+			ctx.parseExcept("Specified script does not exist", name);
 		
 		Script script;
 		String out = ctx.prev();
@@ -1041,7 +1030,7 @@ public class Script
 				script.integrateVarsFrom(ctx);
 			
 			script.putVar(Script.PARENT, ctx.name);
-			script.name = name.unraw;
+			script.name = name;
 			script.run((VarSet[]) objs[3]);
 			
 			if ((boolean) objs[2])
@@ -1061,10 +1050,10 @@ public class Script
 	}, CmdArg.STRING, CmdArg.VAR_SET).setVarArgs();
 	public static final Command RUN_SCRIPT_LABEL = add("run_script_label", Script.VOID, "Runs the given script from the given label. Booleans are the same as those of 'run_script'.", CmdArg.STRING, CmdArg.STRING, CmdArg.BOOLEAN, CmdArg.BOOLEAN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
 	{
-		CmdString name = (CmdString) objs[0];
-		File scr = getScriptFile(name.unraw);
+		String name = (String) objs[0];
+		File scr = getScriptFile(name);
 		if (scr == null)
-			ctx.parseExcept("Specified script does not exist", name.unraw);
+			ctx.parseExcept("Specified script does not exist", name);
 		
 		Script script;
 		String out = ctx.prev();
@@ -1075,12 +1064,12 @@ public class Script
 			if ((boolean) objs[2])
 				script.integrateVarsFrom(ctx);
 			
-			CmdString label = (CmdString) objs[1];
-			Label lab = script.getLabel(label.unraw);
+			String label = (String) objs[1];
+			Label lab = script.getLabel(label);
 			if (lab != null)
 			{
 				script.putVar(Script.PARENT, ctx.name);
-				script.name = name.unraw;
+				script.name = name;
 				script.runFrom(lab, (VarSet[]) objs[4]);
 				if ((boolean) objs[3])
 					ctx.integrateVarsFrom(script);
@@ -1088,7 +1077,7 @@ public class Script
 				out = script.prev();
 			}
 			else
-				ctx.parseExcept("Specified label does not exist", label.unraw, "Script: " + name.unraw);
+				ctx.parseExcept("Specified label does not exist", label, "Script: " + name);
 		}
 		catch (FileNotFoundException | AWTException e)
 		{
@@ -1286,29 +1275,34 @@ public class Script
 	
 	/////////////////////////////////////////////
 	
-	public boolean isArray(String token)
+/*	private boolean varCheck(String token, Predicate<String> check)
 	{
+		if (token.charAt(0) == RAW)
+			return check.test(token.substring(1));
 		String var = getVar(token);
 		if (var != null)
-			return isArray(var);
-		
-		return token.startsWith("" + ARR_S) && token.endsWith("" + ARR_E);
+			return check.test(var);
+		return check.test(token);
 	}
-	public boolean isExecutable(String token)
+	public boolean isArray(String token)
 	{
+		return varCheck(token, (str) -> str.startsWith("" + ARR_S) && str.endsWith("" + ARR_E));
+	}*/
+//	public boolean isExecutable(String token)
+//	{
+//		return varCheck(token, (str) -> str.startsWith("" + SCOPE_S) && str.endsWith("" + SCOPE_E));
+/*		if (token.charAt(0) == RAW)
+			return false;
 		String var = getVar(token);
 		if (var != null)
 			return isExecutable(var);
-		return token.startsWith("" + SCOPE_S) && token.endsWith("" + SCOPE_E);
-	}
-	public boolean isString(String token)
-	{
-		String var = getVar(token);
-		if (var != null)
-			return isString(var);
-		
-		return token.startsWith("" + STRING_CHAR) && token.endsWith("" + STRING_CHAR);
-	}
+		return token.startsWith("" + SCOPE_S) && token.endsWith("" + SCOPE_E);*/
+//	}
+//	public boolean isString(String token)
+//	{
+//		return varCheck(token, (str) -> str.startsWith("" + STRING_CHAR) && token.endsWith("" + STRING_CHAR));
+//		return token.startsWith("" + STRING_CHAR) && token.endsWith("" + STRING_CHAR);
+//	}
 	public static boolean isType(String token)
 	{
 		return OBJECTS.containsKey(token);
@@ -1360,6 +1354,10 @@ public class Script
 		}
 		return !(QTRACK.inside() || SYNTRACK.insideOne());
 	}
+	public static String[] syntaxedSplit(String toSplit, char delim)
+	{
+		return syntaxedSplit(toSplit, "" + delim);
+	}
 	public static String[] syntaxedSplit(String toSplit, String delim)
 	{
 		return syntaxedSplit(toSplit, quote(delim), delim.length(), -1);
@@ -1367,6 +1365,28 @@ public class Script
 	public static String[] syntaxedSplit(String toSplit, String delim, int limit)
 	{
 		return syntaxedSplit(toSplit, quote(delim), delim.length(), limit);
+	}
+	public static boolean syntaxedContains(String toCheck, String regEx, int trackLength)
+	{
+		Pattern pat = Pattern.compile(regEx);
+		QTRACK.reset();
+		SYNTRACK.reset();
+		
+		String recent = "";
+		for (int i = 0; i < toCheck.length(); i++)
+		{
+			char parse = toCheck.charAt(i);
+			
+			QTRACK.track(parse);
+			SYNTRACK.track(parse, QTRACK.inside());
+			
+			recent += parse;
+			if (recent.length() > trackLength)
+				recent = recent.substring(1);
+			if (pat.matcher(recent).matches())
+				return true;
+		}
+		return false;
 	}
 	public static String[] syntaxedSplit(String toSplit, String regEx, int trackLength, int limit)
 	{
@@ -1403,7 +1423,7 @@ public class Script
 				building = building.substring(0, building.length() - trackLength + 1);
 			}
 			
-			if (push && !building.isEmpty())
+			if (push && !((building = building.trim()).isEmpty()))
 			{
 				out.add(building);
 				building = "";
@@ -1513,51 +1533,14 @@ public class Script
 		
 		return tokens.toArray(new String[tokens.size()]);
 	}
-	private static int sameChar(char a, char b) { return a == b ? 1 : 0; }
 	public static String firstToken(String line)
 	{
 		return syntaxedSplit(line, "\\s", 1, 2)[0];
 	}
 	public static String[] arrayElementsOf(String array)
 	{
-		ArrayList<String> elements = new ArrayList<String>();
 		String str = arrayTrim(array);
-		
-		String ele = "";
-		int quotes = 0;
-		int arraysDeep = 0;
-		for (int i = 0; i < str.length(); i++)
-		{
-			boolean escaped = i > 0 && str.charAt(i - 1) == ESCAPE_CHAR;
-			char parseChar = str.charAt(i);
-			
-			if (!escaped)
-			{
-				quotes += sameChar(parseChar, STRING_CHAR);
-				if (quotes % 2 != 1)
-				{
-					arraysDeep += sameChar(parseChar, ARR_S);
-					arraysDeep -= sameChar(parseChar, ARR_E);
-				}
-			}
-			
-			boolean inQuote = quotes % 2 == 1;
-			boolean inArray = arraysDeep > 0;
-			boolean inWord = parseChar != ',' && parseChar != ARR_SEP;
-			boolean buildingElement = inQuote || inArray || inWord;
-			
-			if (buildingElement)
-				ele += parseChar;
-			else if (!ele.isEmpty())
-			{
-				elements.add(ele.trim());
-				ele = "";
-			}
-			if (i == str.length() - 1 && !ele.isEmpty())
-				elements.add(ele.trim());
-		}
-		
-		return elements.toArray(new String[elements.size()]);
+		return syntaxedSplit(str, "" + ARR_SEP);
 	}
 	public static String toArrayString(String[] elements)
 	{
@@ -1565,6 +1548,41 @@ public class Script
 		for (int i = 0; i < elements.length; i++)
 			out += elements[i] + (i == elements.length - 1 ? "" : ARR_SEP + " ");
 		return out + ARR_E;
+	}
+	
+	private static boolean startsWith(String str, char c)
+	{
+		return str.length() > 1 && str.charAt(0) == c;
+	}
+	private static boolean endsWith(String str, char c)
+	{
+		return str.length() > 1 && str.charAt(str.length() - 1) == c;
+	}
+	
+	public static String unpack(String token)
+	{
+		if (startsWith(token, ARR_S))
+			return unpack(token, ARR_S, ARR_E);
+		if (startsWith(token, STRING_CHAR))
+			return unpack(token, STRING_CHAR, STRING_CHAR);
+		if (startsWith(token, TOK_S))
+			return unpack(token, TOK_S, TOK_E);
+		if (startsWith(token, SCOPE_S))
+			return unpack(token, SCOPE_S, SCOPE_E);
+		return token;
+	}
+	
+	private static String unpack(String toUnp, char start, char end)
+	{
+		if (startsWith(toUnp, start) && endsWith(toUnp, end))
+			return toUnp.substring(1, toUnp.length() - 1);
+		return toUnp;
+	}
+	private static String unpack(String toUnp, String start, String end)
+	{
+		if (toUnp.startsWith(start) && toUnp.endsWith(end))
+			return toUnp.substring(start.length(), toUnp.length() - end.length());
+		return toUnp;
 	}
 	
 	public static String tokenize(String... objs)
@@ -1584,129 +1602,61 @@ public class Script
 	
 	///////////
 	
-	private String arrayReplace(Command cmd, int argInd, int tokInd, String array)
+	public ScajlVariable getVar(String input, boolean rawDefault)
 	{
-		String[] elements = arrayElementsOf(array);
-		String replaced = "" + ARR_S;
-		
-		for (int i = 0; i < elements.length; i++)
-			replaced += varParse(cmd, argInd, tokInd, elements[i]) + (i == elements.length - 1 ? "" : ARR_SEP + " ");
-		
-		return replaced + ARR_E;
+		return ScajlVariable.getVar(input, rawDefault, this);
+	}
+	
+	public void putVar(String input, String val)
+	{
+		putVar(input, ScajlVariable.getVar(val, false, this));
+	}
+	
+	public void putVar(String input, ScajlVariable var)
+	{
+		ScajlVariable.putVar(input, var, this);
 	}
 	
 	public <T> T valParse(CmdArg<T> arg, String line, String... tokens)
 	{
+		return valParse(arg, line, (i) -> false, tokens);
+	}
+	public <T> T valParse(CmdArg<T> arg, String line, IntPredicate tokenRawDefault, String... tokens)
+	{
 		int count = arg.tokenCount();
+
+		MixedPair<String[], ScajlVariable[]> tokVarPair = tokVarPair(tokenRawDefault, arg instanceof VarCmdArg, tokens);
+		tokens = tokVarPair.a();
+		ScajlVariable[] vars = tokVarPair.b();
+		
 		if (tokens.length != count)
 			parseExcept("Invalid token count", line, "Argument requires " + count + " tokens, but " + tokens.length + " have been provided. Tokens are separated by spaces.");
-	
-		String trimmed = "";
-		for (int tokInArg = 0; tokInArg < count; tokInArg++)
-			trimmed += varParse(null, 0, tokInArg, tokens[tokInArg]) + " ";
 		
-		trimmed = trimmed.trim();
-		T obj = arg.parse(trimmed);
+		T obj = arg.parse(tokens, vars, 0, this);
 		
 		if (obj == null)
-			parseExcept("Invalid token resolution", trimmed, "Expected type: " + arg.type);
+			parseExcept("Invalid token resolution", StringUtils.toString(tokens, "", " ", ""), "Expected type: " + arg.type);
 		
 		return obj;
 	}
+	public MixedPair<String[], ScajlVariable[]> tokVarPair(IntPredicate tokenRawDefault, boolean unresolved, String... tokens)
+	{
+		ScajlVariable[] vars = new ScajlVariable[tokens.length];
+		Ind ind = new Ind(0);
+		int tokInd = 0;
+		for (int i = 0; i < vars.length; i = ind.get())
+		{
+			final int ii = i;
+			ScajlVariable var = getVar(tokens[tokInd++], tokenRawDefault.test(ii));
+			ScajlVariable[] toInsert = var.splitTokens((splInd) -> tokenRawDefault.test(ii + splInd), this);
+			vars = AUtils.replace(vars, toInsert, i, ind);
+		}
+		tokens = new String[vars.length];
+		for (int i = 0; i < vars.length; i++)
+			tokens[i] = !unresolved ? vars[i].val(this) : vars[i].raw();
+		return new MixedPair<>(tokens, vars);
+	}
 	
-	public String varParse(Command cmd, int argInd, int tokInd, String token)
-	{
-		String trm = varTrim(token);
-		
-		boolean array = isArray(token);
-		if (!array && CmdArg.DOUBLE.parse(trm) != null)
-			return trm;
-		
-		boolean unraw = token.charAt(0) == UNRAW || token.charAt(0) == VAR_ARG_ARRAY;
-		boolean raw = token.charAt(0) == RAW;
-		
-		if (raw || (!unraw && (cmd != null && cmd.rawToken(argInd, tokInd)))) // If raw, return what's written.
-			return trm;
-		
-		if (array)
-		{
-			String got = getVar(trm);
-			String var = arrPreFrom(trm) + got + arrPostFrom(trm);
-			return got == null ? arrayReplace(cmd, argInd, tokInd, trm) : var;
-		}
-		
-		String[] arrAcc = arrAccOf(trm);
-		if (arrAcc.length > 1)
-		{
-			if (!isArray(arrAcc[0]))
-				parseExcept("Array access attempted on non-array variable", arrAcc[0]);
-			
-			String[] elements = arrayElementsOf(varParse(cmd, argInd, tokInd, arrAcc[0]));
-			
-			if (arrAcc[1].equals(ARR_LEN))
-				return "" + elements.length;
-			
-			Integer i = CmdArg.INT.parse(varParse(cmd, argInd, tokInd, arrAcc[1]));
-			if (i == null)
-				parseExcept("Null index passed to array", arrAcc[0], arrAcc[1]);
-			try
-			{
-				String extra = "";
-				for (int j = 2; j < arrAcc.length; j++)
-					extra += ARR_ACCESS + arrAcc[j];
-				return varParse(cmd, argInd, tokInd, elements[i] + extra);
-			}
-			catch (IndexOutOfBoundsException e)
-			{
-				parseExcept("Index out of bounds", arrAcc[0], "" + i);
-			}
-		}
-		
-		if (isExecutable(trm))
-			return runExecutable(getVarOrReturnParam(trm)).output;
-		
-		String var = getVar(trm); // trm is not an array.
-		if (var != null && !raw) // If not raw, it is a request to use the contents of the variable.
-			return var;
-		else
-			return trm;
-	}
-	public static String arrPreFrom(String token)
-	{
-		String pre = "";
-		for (int i = 0; i < token.length(); i++)
-		{
-			if (token.charAt(i) == ARR_S)
-				pre += ARR_S;
-			else
-				return pre;
-		}
-		return pre;
-	}
-	public static String arrPostFrom(String token)
-	{
-		String post = "";
-		for (int i = token.length() - 1; i >= 0; i--)
-		{
-			if (token.charAt(i) == ARR_E)
-				post += ARR_E;
-			else
-				return post;
-		}
-		return post;
-	}
-	private static String varTrim(String str)
-	{
-		return replaceIfFirst(replaceIfFirst(replaceIfFirst(str.trim(), UNRAW, ""), RAW, ""), VAR_ARG_STR, "");
-//		return str.trim().replaceFirst(quote(UNRAW), "").replaceFirst(quote(RAW), "").replaceFirst(quote(VAR_ARG_STR), "");
-	}
-	private static String getTrim(String str)
-	{
-		String trm = varTrim(str);
-		if (!(trm.startsWith("" + ARR_S) && trm.endsWith("" + ARR_E)))
-				trm = trm.replaceAll(quote(ARR_S), "").replaceAll(quote(ARR_E), "");
-		return trm;
-	}
 	private static String quote(String str)
 	{
 		return Pattern.quote(str);
@@ -1715,25 +1665,14 @@ public class Script
 	{
 		return quote("" + chr);
 	}
-	private static String replaceIfFirst(String str, char find, String rep)
-	{
-		return replaceIfFirst(str, "" + find, rep);
-	}
-	private static String replaceIfFirst(String str, String find, String rep)
-	{
-		if (str.isEmpty())
-			return str;
-		if (str.startsWith(find))
-			return str.replaceFirst(quote(find), rep);
-		return str;
-	}
-	public static String[] replaceTokenWith(String[] tokens, String[] toInsert, int index)
+	public static String[] replaceTokenWith(String[] tokens, String[] toInsert, int index, AtomicInteger newInd)
 	{
 		String[] tokensExt = new String[tokens.length - 1 + toInsert.length];
 		ArrayUtils.fillFrom(tokensExt, tokens, 0, 0, index);
 		ArrayUtils.fillFrom(tokensExt, toInsert, index, 0, toInsert.length);
 		if (index != tokens.length - 1)
 			ArrayUtils.fillFrom(tokensExt, tokens, index + toInsert.length, index + 1, tokens.length - (index + 1));
+		newInd.set(index + toInsert.length);
 		return tokensExt;
 	}
 	
@@ -1748,6 +1687,7 @@ public class Script
 		}
 		return scr;
 	}
+	
 	
 	private final ArrayDeque<String> bufferedPEs = new ArrayDeque<>();
 	private RunnableCommand parse(String line, CmdHead head, Bool breakIf)
@@ -1783,26 +1723,18 @@ public class Script
 						boolean firstVarArg = varArgs && argInd == args.length - 1;
 						int varArgInd = Math.min(argInd, args.length - 1);
 						
-						String[] tokens = tokensOf(argStrs[argInd]);
-						for (int tokInd = 0; tokInd < tokens.length; tokInd++)
-						{
-							if (isExecutable(tokens[tokInd]))
-							{
-								CommandResult res = runExecutable(getVarOrReturnParam(tokens[tokInd]));
-								tokens = replaceTokenWith(tokens, tokensOf(res.output), tokInd);
-								tokInd--;
-							}
-						}
-						
 						if (varArgArray && !firstVarArg)
 							parseExcept("Invalid argument count", line, "If var-arg arguments are specified as an array, the array must be the last argument");
 						
-						CmdArg<?> arg = args[Math.min(argInd, args.length - 1)];
+						CmdArg<?> arg = args[varArgInd];
 						final CmdArg<?> origArg = arg;
 						boolean firstGo = true;
 						LinkedHashMap<String, CmdArg<?>> bin = CmdArg.ARGS.get(arg.cls);
 						Iterator<CmdArg<?>> binIt = bin == null ? null : bin.values().iterator();
 						
+						String[] tokenSource = tokensOf(argStrs[argInd]);
+						
+						String tokenSourceStr = StringUtils.toString(tokenSource, "", " ", "");
 						Object obj = null;
 						
 						bufferedPEs.clear();
@@ -1815,22 +1747,25 @@ public class Script
 							if (!varArgArray)
 							{
 								int count = arg.tokenCount();
+								final CmdArg<?> aarg = arg;
+								MixedPair<String[], ScajlVariable[]> tokVarPair = tokVarPair((i) -> cmd.rawArg[varArgInd] || aarg.rawToken(i), aarg instanceof VarCmdArg, tokenSource);
+								String[] tokens = tokVarPair.a();
+								trimmed = StringUtils.toString(tokens, "", " ", "");
+								ScajlVariable[] vars = tokVarPair.b();
 								if (tokens.length != count)
 								{
-									bufferedPEs.push(getParseExceptString("Invalid token count for format '" + arg.type + "'", line, "Argument " + (argInd + 1) + " requires " + count + " tokens, but " + tokens.length + " have been provided. Tokens are separated by spaces."));
+									bufferedPEs.push(getParseExceptString("Invalid token count for CmdArg format '" + arg.type + "'", line, "Format requires " + count + " tokens, but " + tokens.length + " have been provided. Tokens are separated by spaces. From tokens: " + tokenSourceStr));
 									continue;
 								}
 								
-								for (int tokInArg = 0; tokInArg < count; tokInArg++)
-									trimmed += varParse(cmd, varArgInd, tokInArg, tokens[tokInArg]) + " ";
+								obj = arg.parse(tokens, vars, 0, this);
 								
-								trimmed = trimmed.trim();
-								obj = arg.parse(trimmed);
 								if (obj == null && !cmd.nullableArg(varArgInd))
 								{
-									bufferedPEs.push(getParseExceptString("Invalid token resolution", trimmed, "Expected type: " + arg.type));
+									bufferedPEs.push(getParseExceptString("Invalid token resolution", trimmed, "Expected type: " + arg.type + ". From tokens: " + tokenSourceStr));
 									continue;
 								}
+									
 								
 								if (!atVA)
 									objs[argInd] = obj;
@@ -1839,8 +1774,12 @@ public class Script
 							}
 							else
 							{
-								trimmed = varParse(cmd, args.length - 1, 0, tokens[0]);
-								obj = CmdArg.arrayOf(arg).parse(trimmed);
+								final CmdArg<?> arrArg = cmd.variadic, aarg = arg;
+								MixedPair<String[], ScajlVariable[]> tokVarPair = tokVarPair((i) -> cmd.rawArg[varArgInd] || aarg.rawToken(i), aarg instanceof VarCmdArg, tokenSource);
+								String[] tokens = tokVarPair.a();
+								ScajlVariable[] vars = tokVarPair.b();
+								trimmed = tokens[0];
+								obj = arrArg.parse(tokens, vars, 0, this);
 								if (obj == null && !cmd.nullableArg(argInd))
 								{
 									bufferedPEs.push(getParseExceptString("Invalid var-arg array resolution", trimmed, tokens[0]));
@@ -1943,7 +1882,7 @@ public class Script
 			if (!syntaxCheck(lines[i]))
 				throw new CommandParseException("Invalid syntax at line " + (i + 1) + ": " + lines[i] + ". Unfinished delimiter.");
 
-		putVar(PARENT, NULL);
+		putVar(PARENT, ScajlVariable.NULL);
 	}
 	
 	public Script(File script) throws FileNotFoundException, AWTException
@@ -1982,7 +1921,7 @@ public class Script
 	{
 		pushStack(label);
 		for (VarSet var : varSets)
-			putVar(var.var, var.set.raw);
+			putVar(var.var, var.set);
 		if (keyIn == null)
 			keyIn = new Scanner(System.in);
 		
@@ -2009,7 +1948,7 @@ public class Script
 			parseLine++;
 		}
 	}
-	private CommandResult runExecutable(String executableLine)
+	protected CommandResult runExecutable(String executableLine)
 	{
 		return runExecutable(executableLine, new Bool(false));
 	}
@@ -2117,71 +2056,20 @@ public class Script
 		return parent.getMemberCmd(head.name);
 	}
 	
-	public void putVar(String name, String val)
-	{
-//		if (name.contains("" + ARR_S) || name.contains("" + ARR_E) || name.contains("" + STRING_CHAR) || name.contains("" + ESCAPE_CHAR))
-		if (ILLEGAL_VAR_MATCHER.matcher(name).find())
-			parseExcept("Illegal characters in variable name", name);
-		try
-		{
-			Double.parseDouble(name);
-			parseExcept("Numerical variable name", name);
-		}
-		catch (NumberFormatException e)
-		{}
-		scope.put(name, val);
-	}
-	
 	public void integrateVarsFrom(Script other)
 	{
 		scope.integrateFrom(other.scope);
 	}
 	
-	public String getVarOrReturnParam(String nameOrReturn)
-	{
-		String got = getVar(nameOrReturn);
-		if (got != null)
-			return getVarOrReturnParam(got);
-		return nameOrReturn;
-	}
-	public String getVar(String name)
-	{
-		String trm = getTrim(name);
-		String got = scope.get(trm);
-		boolean ref = got != null && got.startsWith("" + REF);
-		if (ref)
-		{
-			String target = got.substring(1);
-			if (isExecutable(target))
-				return target;
-			return getVar(target);
-		}
-		
-		if (got != null && got.startsWith("" + ARR_S) && got.endsWith("" + ARR_E))
-		{
-			String[] elements = arrayElementsOf(got);
-			String out = "" + ARR_S;
-			for (int i = 0; i < elements.length; i++)
-			{
-				if (elements[i].startsWith("" + REF))
-					elements[i] = getVar(elements[i].substring(1));
-				out += elements[i] + (i == elements.length - 1 ? "" : ARR_SEP + " ");
-			}
-			out += ARR_E;
-			return out;
-		}
-		
-		return got;
-	}
 	public String prev()
 	{
-		return getVar(PREVIOUS);
+		return getVar(PREVIOUS, false).raw();
 	}
 	public static String arrayTrim(String token)
 	{
 		String str = token.trim();
-		if (str.startsWith("" + ARR_S))
 			str = str.substring(1);
+			if (str.startsWith("" + ARR_S))
 		if (str.endsWith("" + ARR_E))
 			str = str.substring(0, str.length() - 1);
 		return str;
@@ -2206,7 +2094,7 @@ public class Script
 		return StringUtils.startWithout(StringUtils.endWithout(token.trim(), "" + TOK_E), "" + TOK_S);
 	}
 	
-	public static boolean[] prefixModsFrom(String test, String[] valid)
+	public static MixedPair<boolean[], String> prefixModsFrom(String test, String[] valid)
 	{
 		boolean[] out = new boolean[valid.length];
 		int startsWith = -1;
@@ -2215,7 +2103,7 @@ public class Script
 			out[startsWith] = true;
 			test = test.replaceFirst(quote(valid[startsWith]), "");
 		}
-		return out;
+		return new MixedPair<boolean[], String>(out, test);
 	}
 	private static int startsWithOneOf(String test, String[] valid)
 	{

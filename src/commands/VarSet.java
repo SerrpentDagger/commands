@@ -3,9 +3,9 @@ package commands;
 public class VarSet
 {
 	public final String var;
-	public final CmdString set;
+	public final ScajlVariable set;
 	
-	public VarSet(String var, CmdString set)
+	public VarSet(String var, ScajlVariable set)
 	{
 		this.var = var;
 		this.set = set;

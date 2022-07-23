@@ -9,6 +9,7 @@ public class Command
 	String ret;
 	String desc;
 	CmdArg<?>[] args;
+	CmdArg<?> variadic = null;
 	CmdFunc func;
 	
 	protected Command(String name, String ret, String desc, CmdArg<?>... args)
@@ -30,6 +31,7 @@ public class Command
 	public Command setVarArgs()
 	{
 		isVarArgs = true;
+		variadic = CmdArg.arrayOf(args[args.length - 1]);
 		return this;
 	}
 	
