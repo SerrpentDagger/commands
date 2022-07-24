@@ -12,7 +12,7 @@ import utilities.ArrayUtils;
 
 public abstract class CmdArg<T>
 {
-	static final HashMap<Class<?>, LinkedHashMap<String, CmdArg<?>>> ARGS = new HashMap<>();
+	static final HashMap<Class<?>, LinkedHashMap<Integer, CmdArg<?>>> ARGS = new HashMap<>();
 	private static final HashMap<Class<?>, Class<?>> WRAP_PRIMITIVE = new HashMap<>();
 	{
 		WRAP_PRIMITIVE.put(boolean.class, Boolean.class);
@@ -31,16 +31,16 @@ public abstract class CmdArg<T>
 
 	public static <T> CmdArg<T> reg(CmdArg<T> arg, Class<T> toClass)
 	{
-		LinkedHashMap<String, CmdArg<?>> bin = ARGS.get(toClass);
+		LinkedHashMap<Integer, CmdArg<?>> bin = ARGS.get(toClass);
 		if (bin != null)
 		{
-			if (!bin.containsKey(arg.regId))
-				bin.put(arg.regId, arg);
+			if (!bin.containsKey(arg.tokenCount()))
+				bin.put(arg.tokenCount(), arg);
 		}
 		else
 		{
-			LinkedHashMap<String, CmdArg<?>> mp = new LinkedHashMap<>();
-			mp.put(arg.regId, arg);
+			LinkedHashMap<Integer, CmdArg<?>> mp = new LinkedHashMap<>();
+			mp.put(arg.tokenCount(), arg);
 			ARGS.put(toClass, mp);
 		}
 		return arg;
@@ -49,7 +49,7 @@ public abstract class CmdArg<T>
 	@SuppressWarnings("unchecked")
 	public static <T> CmdArg<T> getArgFor(Class<T> cls)
 	{
-		LinkedHashMap<String, CmdArg<?>> bin = ARGS.get(cls);
+		LinkedHashMap<Integer, CmdArg<?>> bin = ARGS.get(cls);
 		if (bin == null || bin.isEmpty())
 		{
 			if (cls.isArray())
@@ -85,12 +85,11 @@ public abstract class CmdArg<T>
 		@SuppressWarnings("unchecked")
 		public String castAndUnparse(Object obj) { return arg.unparse((TY) obj); }
 	}
-	
+
 	/////////////////////////////////////////
 	
 	public final String type;
 	public final Class<T> cls;
-	private String regId = "";
 	public CmdArg(String type, Class<T> cls)
 	{
 		this.type = type;
@@ -114,15 +113,11 @@ public abstract class CmdArg<T>
 	public boolean rawToken(int ind) { return false; }
 	public int tokenCount() { return 1; }
 	
-	public CmdArg<T> reg() { return reg(regId); }
-	public CmdArg<T> reg(int i) { return reg("" + i); }
-	public CmdArg<T> reg(String regId)
+	public CmdArg<T> reg()
 	{
-		this.regId = regId;
 		reg(this, cls);
 		return this;
 	}
-	public String getRegId() { return regId; }
 	
 	public abstract T parse(String trimmed, String[] tokens, Script ctx);
 	public T parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
@@ -136,10 +131,10 @@ public abstract class CmdArg<T>
 		String[] toks = new String[count];
 		for (int i = 0; i < count; i++)
 		{
-			str += tokens[off + i] + " ";
+			str += tokens[off + i] + (i == count - 1 ? "" : " ");
 			toks[i] = tokens[off + i];
 		}
-		return parse(str.trim(), toks, ctx);
+		return parse(str, toks, ctx);
 	}
 	public T parse(String trimmed)
 	{
@@ -182,16 +177,62 @@ public abstract class CmdArg<T>
 		{
 			return (VarCmdArg<T>) super.reg();
 		}
-		@Override
-		public VarCmdArg<T> reg(int i)
+	}
+	
+	public static abstract class PrefCmdArg<T> extends CmdArg<T>
+	{
+		private final HashMap<String, CmdArg<T>> prefixes = new HashMap<>();
+		private int tokenCount = 0;
+		
+		public PrefCmdArg(String type, Class<T> cls)
 		{
-			return (VarCmdArg<T>) super.reg(i);
+			super(type, cls);
 		}
-		@Override
-		public VarCmdArg<T> reg(String regId)
+		
+		public PrefCmdArg<T> add(String prefix, CmdArg<T> toAdd)
 		{
-			return (VarCmdArg<T>) super.reg(regId);
+			if (prefixes.isEmpty())
+				tokenCount = toAdd.tokenCount() + 1;
+			if (toAdd.tokenCount() != tokenCount() - 1)
+				throw new IllegalArgumentException("Added CmdArg must have matching tokenCount.");
+			prefixes.put(prefix.toUpperCase(), toAdd);
+			return this;
 		}
+		
+		@Override
+		public int tokenCount()
+		{
+			return tokenCount;
+		}
+		
+		@Override
+		public boolean rawToken(int ind)
+		{
+			return ind == 0;
+		}
+		
+		@Override
+		public T parse(String trimmed, String[] tokens, Script ctx)
+		{
+			CmdArg<T> arg = prefixes.get(tokens[0].toUpperCase());
+			if (arg == null)
+				return null;
+			return arg.parse(tokens, 1, ctx);
+		}
+		
+		@Override
+		public PrefCmdArg<T> reg()
+		{
+			if (prefixes.isEmpty())
+				throw new IllegalStateException("Cannot register PrefCmdArg before assigning at least one contained CmdArg with which tokenCount can be determined.");
+			return (PrefCmdArg<T>) super.reg();
+		}
+	}
+	
+	@FunctionalInterface
+	public interface ObjConstruct<T>
+	{
+		public T construct(Object[] objs);
 	}
 	
 	////////////////////////////////////////////////////////////////////////////////////////////////
@@ -355,7 +396,7 @@ public abstract class CmdArg<T>
 				return null;
 			return op.eval(a, b);
 		}
-	}.reg("expression");
+	}.reg();
 	
 	public static final CmdArg<Float> FLOAT = new CmdArg<Float>("Float", Float.class)
 	{	
@@ -689,6 +730,93 @@ public abstract class CmdArg<T>
 	
 	////////////////////////////////////////
 	
+	@SuppressWarnings("unchecked")
+	public static <X> PrefCmdArg<X> prefixedOf(CmdArg<X> arg, String prefix)
+	{
+		LinkedHashMap<Integer, CmdArg<?>> bin = ARGS.get(arg.cls);
+		int tc = arg.tokenCount() + 1;
+		PrefCmdArg<X> pref = null;
+		if (bin != null)
+			pref = (PrefCmdArg<X>) bin.get(tc);
+		
+		if (pref == null)
+		{
+			pref = new PrefCmdArg<X>(prefix + " " + arg.type, arg.cls)
+			{
+				@Override
+				public String unparse(X obj)
+				{
+					return arg.unparse(obj);
+				}
+			};
+			pref.add(prefix, arg).reg();
+		}
+		else
+			pref.add(prefix, arg);
+		return pref;
+	}
+	
+	public static <T> CmdArg<T> inlineOf(ObjConstruct<T> construct, CmdArg<T> original, CmdArg<?>... args)
+	{
+		int tokenCount = 0;
+		String format = "";
+		for (CmdArg<?> arg : args)
+		{
+			tokenCount += arg.tokenCount();
+			format += arg.type + " ";
+		}
+		format.trim();
+		final int tc = tokenCount;
+		
+		CmdArg<T> inline = new CmdArg<T>(format, original.cls)
+		{
+			@Override
+			public int tokenCount()
+			{
+				return tc;
+			}
+		
+			@Override
+			public boolean rawToken(int ind)
+			{
+				for (int i = 0; i < args.length; i++)
+				{
+					if (ind < args[i].tokenCount())
+						return args[i].rawToken(ind);
+					ind -= args[i].tokenCount();
+				}
+				return false;
+			}
+			
+			@Override
+			public T parse(String trimmed, String[] tokens, Script ctx)
+			{
+				Object[] objs = new Object[args.length];
+				int t = 0;
+				for (int a = 0; a < args.length; a++)
+				{
+					String trmd = "";
+					for (int i = 0; i < args[a].tokenCount(); i++)
+						trmd += tokens[t + i] + (i == args[a].tokenCount() - 1 ? "" : " ");
+					t += args[a].tokenCount();
+					objs[a] = args[a].parse(trmd);
+					if (objs[a] == null)
+						return null;
+				}
+				
+				return construct.construct(objs);
+			}
+			
+			@Override
+			public String unparse(T obj)
+			{
+				return original.unparse(obj);
+			}
+		};
+		
+		return inline.reg();
+	}
+	
 	private static <X> CmdArg<X> unwrappedOf(CmdArg<?> wrappedArg, Class<X> toPrim)
 	{
 		return new CmdArg<X>(toPrim.getSimpleName(), toPrim)
@@ -742,9 +870,9 @@ public abstract class CmdArg<T>
 	public static <X> CmdArg<X[]> arrayOf(CmdArg<X> arg)
 	{
 		Class<X[]> arrClass = (Class<X[]>) Array.newInstance(arg.cls, 0).getClass();
-		LinkedHashMap<String, CmdArg<?>> arrayBin = ARGS.get(arrClass);
+		LinkedHashMap<Integer, CmdArg<?>> arrayBin = ARGS.get(arrClass);
 		
-		CmdArg<X[]> array = arrayBin == null ? null : (CmdArg<X[]>) arrayBin.get("auto-arr");
+		CmdArg<X[]> array = arrayBin == null ? null : (CmdArg<X[]>) arrayBin.get(1);
 		if (array == null)
 		{
 			array = new CmdArg<X[]>(Script.ARR_S + arg.type + Script.ARR_E, arrClass)
@@ -786,7 +914,7 @@ public abstract class CmdArg<T>
 						elements[i] = arg.unparse(obj[i]);
 					return Script.toArrayString(elements);
 				}
-			}.reg("auto-arr");
+			}.reg();
 		}
 		
 		return array;

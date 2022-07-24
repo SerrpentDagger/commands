@@ -5,10 +5,11 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map.Entry;
 import java.util.function.Consumer;
-import java.util.function.IntPredicate;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
+import arrays.AUtils;
+import arrays.AUtils.Ind;
 import mod.serpentdagger.artificialartificing.utils.group.MixedPair;
 import utilities.StringUtils;
 
@@ -35,7 +36,13 @@ public abstract class ScajlVariable
 		return new VarCtx(() -> this);
 	}
 	
-	public ScajlVariable[] splitTokens(IntPredicate rawDefault, Script ctx)
+	@Override
+	public String toString()
+	{
+		return raw();
+	}
+	
+/*	public ScajlVariable[] splitTokens(IntPredicate rawDefault, Script ctx)
 	{
 		String[] split = Script.tokensOf(input);
 		ScajlVariable[] out = new ScajlVariable[split.length];
@@ -45,7 +52,7 @@ public abstract class ScajlVariable
 		else
 			out[0] = this;
 		return out;
-	}
+	}*/
 	
 	@Override
 	public abstract ScajlVariable clone();
@@ -210,9 +217,9 @@ public abstract class ScajlVariable
 			while (it.hasNext())
 			{
 				Entry<String, ScajlVariable> ent = it.next();
-				out += ent.getKey() + Script.MAP_KEY_EQ + ent.getValue().raw() + (it.hasNext() ? Script.ARR_SEP + " " : Script.ARR_E);
+				out += ent.getKey() + Script.MAP_KEY_EQ + ent.getValue().raw() + (it.hasNext() ? Script.ARR_SEP + " " : "");
 			}
-			return out;
+			return out + Script.ARR_E;
 		}
 
 		@SuppressWarnings("unchecked")
@@ -222,6 +229,47 @@ public abstract class ScajlVariable
 			return new SVMap(input, modless, null, (LinkedHashMap<String, ScajlVariable>) map.clone());
 		}
 		
+	}
+	
+	public static class SVTokGroup extends SVMember
+	{
+		private ScajlVariable[] array;
+
+		public SVTokGroup(String input, String modless, Script ctx)
+		{
+			super(input, modless, null);
+			String[] elements = Script.tokensOf(Script.unpack(modless));
+			array = new ScajlVariable[elements.length];
+			for (int i = 0; i < elements.length; i++)
+				array[i] = getVar(elements[i], false, ctx);
+		}
+		public SVTokGroup(String input, String modless, ScajlVariable[] array)
+		{
+			super(input, modless, null);
+			this.array = array;
+		}
+		
+		@Override
+		public String raw()
+		{
+			String out = "" + Script.TOK_S;
+			for (int i = 0; i < array.length; i++)
+				out += array[i].raw() + (i == array.length - 1 ? "" : " ");
+			return out + Script.TOK_E;
+		}
+		
+		@Override
+		public SVArray clone()
+		{
+			return new SVArray(input, modless, null, Arrays.copyOf(array, array.length));
+		}
+		@Override
+		public VarCtx varCtx(String[] memberAccess, int off, boolean put, Script ctx)
+		{
+			if (put || memberAccess != null && off != memberAccess.length)
+				ctx.parseExcept("Invalid member access", "The indexed variable is not a type which can be indexed.", "From access: " + StringUtils.toString(memberAccess, "", "" + Script.ARR_ACCESS, ""));
+			return new VarCtx(() -> this);
+		}
 	}
 	
 	public static class SVArray extends SVMember
@@ -254,8 +302,8 @@ public abstract class ScajlVariable
 		{
 			String out = "" + Script.ARR_S;
 			for (int i = 0; i < array.length; i++)
-				out += array[i].raw() + (i == array.length - 1 ? Script.ARR_E : Script.ARR_SEP + " ");
-			return out;
+				out += array[i].raw() + (i == array.length - 1 ? "" : Script.ARR_SEP + " ");
+			return out + Script.ARR_E;
 		}
 		
 		@Override
@@ -324,9 +372,15 @@ public abstract class ScajlVariable
 	public static void putVar(String name, ScajlVariable var, Script ctx)
 	{
 		String[] arrAcc = Script.syntaxedSplit(name, "" + Script.ARR_ACCESS);
-		ScajlVariable toVar = getVar(arrAcc[0], true, ctx);
+		ScajlVariable toVar = getVar(arrAcc[0], arrAcc.length == 1, ctx);
 		if (arrAcc.length > 1)
-			toVar.varCtx(arrAcc, 1, true, ctx).put.accept(var);
+		{
+			String[] access = new String[arrAcc.length];
+			for (int i = 0; i < access.length; i++)
+				if (i > 0)
+					access[i] = getVar(arrAcc[i], false, ctx).val(ctx);
+			toVar.varCtx(access, 1, true, ctx).put.accept(var);
+		}
 		else
 		{
 			name = toVar.input;
@@ -357,6 +411,28 @@ public abstract class ScajlVariable
 		return var != null;
 	}
 	
+	public static String[] preParse(String token, Script ctx)
+	{
+		return preParse(new String[] { token }, ctx);
+	}
+	
+	public static String[] preParse(String[] tokens, Script ctx)
+	{
+		Ind ind = new Ind(0);
+		for (int i = 0; i < tokens.length; i = ind.get())
+		{
+			if (tokens[i].charAt(0) == Script.UNPACK)
+			{
+				String unp = getVar(tokens[i].substring(1), false, ctx).val(ctx);
+				unp = Script.unpack(unp);
+				tokens = AUtils.replace(tokens, Script.tokensOf(unp), i, ind);
+			}
+			else
+				ind.inc();
+		}
+		return tokens;
+	}
+	
 	public static ScajlVariable getVar(String input, boolean rawDef, Script ctx)
 	{
 		if (input.equals(Script.NULL))
@@ -372,32 +448,48 @@ public abstract class ScajlVariable
 		boolean isRaw = mods[1] || (rawDef && !isUnraw);
 		boolean isRef = mods[2];
 		boolean isRawCont = mods[3];
+		boolean isUnpack = mods[4] || mods[5];
+		if (isUnpack)
+			ctx.parseExcept("Illegal reference modifier.", "The 'unpack' reference modifier is disallowed for this location.", input);
 		int modCount = countTrues(mods);
 		if (modCount > 1)
 			ctx.parseExcept("Invalid variable usage", "A maximum of 1 reference modifier is allowed per token");
-		String[] arrAcc = Script.syntaxedSplit(modless, "" + Script.ARR_ACCESS);
-		if (arrAcc.length > 1)
+		if (!isRaw)
 		{
-			ScajlVariable var = ctx.scope.get(arrAcc[0]);
-			if (var == null)
-				return NULL;
-			return var.varCtx(arrAcc, 1, false, ctx).get.get();
+			String[] arrAcc = Script.syntaxedSplit(input, "" + Script.ARR_ACCESS);
+			if (arrAcc.length > 1)
+			{
+				String[] access = new String[arrAcc.length];
+				ScajlVariable var = null;
+				for (int i = 0; i < access.length; i++)
+				{
+					if (i > 0)
+						access[i] = getVar(arrAcc[i], false, ctx).val(ctx);
+					else
+						var = getVar(arrAcc[0], false, ctx);
+				}
+				
+				return var.varCtx(access, 1, false, ctx).get.get();
+			}
 		}
 		
 		boolean isString = modless.startsWith("" + Script.STRING_CHAR);
 		if (isString && !modless.endsWith("" + Script.STRING_CHAR))
 			ctx.parseExcept("Malformed String", "A quoted String must start and end with the '\"' character.");
-		boolean hasEq = Script.syntaxedContains(modless, Pattern.quote("" + Script.MAP_KEY_EQ), 1);
-		boolean isContainer = modless.startsWith("" + Script.ARR_S);
+		boolean isContainer = !isString && modless.startsWith("" + Script.ARR_S);
+		boolean hasEq = isContainer && Script.syntaxedContains(modless, Pattern.quote("" + Script.MAP_KEY_EQ), 1);
 		if (isContainer && !modless.endsWith("" + Script.ARR_E))
 			ctx.parseExcept("Malformed Container", "An Array or Map must start and end with the '" + Script.ARR_S + "' and '" + Script.ARR_E + "' characters, respectively.");
 		boolean isArray = isContainer && !hasEq;
 		boolean isMap = isContainer && hasEq;
-		
 		if ((isArray || isMap || isString) && modCount > 0)
 			ctx.parseExcept("Invalid value usage", "A quoted String or an Array or Map must start and end with their respective boxing characters.");
+			
+		boolean isGroup = !isContainer && modless.startsWith("" + Script.TOK_S);
+		if (isGroup && !modless.endsWith("" + Script.TOK_E))
+			ctx.parseExcept("Malformed Token Group", "A Token Group must start and end with the '" + Script.TOK_S + "' and '" + Script.TOK_E + "' characters, respectively.");
 		
-		boolean isExec = modless.startsWith("" + Script.SCOPE_S);
+		boolean isExec = !isGroup && modless.startsWith("" + Script.SCOPE_S);
 		if (isExec && !modless.endsWith("" + Script.SCOPE_E))
 			ctx.parseExcept("Malformed Executable", "An Executable must start and end with the '" + Script.SCOPE_S + "' and '" + Script.SCOPE_E + "' characters, respectively.");
 		
@@ -411,6 +503,8 @@ public abstract class ScajlVariable
 			return new SVString(input, modless);
 		if (isArray)
 			return new SVArray(input, modless, null, ctx);
+		if (isGroup)
+			return new SVTokGroup(input, modless, ctx);
 		if (isMap)
 			return new SVMap(input, modless, null, ctx);
 		if (isRaw)

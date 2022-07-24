@@ -9,6 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.Map.Entry;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import commands.CmdArg.ObjConstruct;
 import commands.Script.CommandParseException;
 import mod.serpentdagger.artificialartificing.utils.group.MixedPair;
 import utilities.StringUtils;
@@ -164,19 +165,26 @@ public class ScriptObject<T>
 		return cmd;
 	}
 	
-	public CmdArg<T> add(SOConstruct<T> construct, CmdArg<?>... args)
+	public CmdArg<T> add(CmdArg<T> inline)
 	{
-		int tokenCount = 0;
-		String format = "";
-		for (CmdArg<?> arg : args)
-		{
-			tokenCount += arg.tokenCount();
-			format += arg.type + " ";
-		}
-		format.trim();
-		final int tc = tokenCount;
+		LinkedHashMap<Integer, CmdArg<?>> bin = CmdArg.ARGS.get(cmdArg.cls);
+		if (bin != null && bin.get(inline.tokenCount()) != inline)
+			throw new IllegalArgumentException("Cannot register more than one CmdArg for the same token count. Use a PrefCmdArg for this.");
 		
-		CmdArg<T> inline = new CmdArg<T>(format, cmdArg.cls)
+		inlineConst = Arrays.copyOf(inlineConst, inlineConst.length + 1);
+		inlineConst[inlineConst.length - 1] = inline;
+		inline.reg();
+
+		return inline;
+	}
+	
+	public CmdArg<T> add(ObjConstruct<T> construct, CmdArg<?>... args)
+	{
+		CmdArg<T> inline = CmdArg.inlineOf(construct, cmdArg, args);
+		
+		return add(inline);
+		
+/*		CmdArg<T> inline = new CmdArg<T>(format, cmdArg.cls)
 		{
 			@Override
 			public int tokenCount()
@@ -220,12 +228,7 @@ public class ScriptObject<T>
 			{
 				return cmdArg.unparse(obj);
 			}
-		};
-		
-		inlineConst = Arrays.copyOf(inlineConst, inlineConst.length + 1);
-		inlineConst[inlineConst.length - 1] = inline;
-		inline.reg(newArgRegID());
-		return inline;
+		};*/
 	}
 	
 	public void setDescription(String str)
@@ -303,13 +306,5 @@ public class ScriptObject<T>
 	public Command getMemberCmd(String name)
 	{
 		return memberCmds.get(name);
-	}
-	
-	///////////////////////
-	
-	@FunctionalInterface
-	public interface SOConstruct<T>
-	{
-		public T construct(Object[] objs);
 	}
 }

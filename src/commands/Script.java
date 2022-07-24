@@ -20,7 +20,6 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -34,7 +33,6 @@ import java.util.function.IntPredicate;
 import java.util.regex.Pattern;
 
 import arrays.AUtils;
-import arrays.AUtils.Ind;
 import commands.CmdArg.TypeArg;
 import commands.CmdArg.VarCmdArg;
 import commands.Command.CommandResult;
@@ -93,12 +91,16 @@ public class Script
 	public static final String INDEX = "INDEX";
 	public static final int NO_LABEL = -2;
 	public static final Label GLOBAL = new Label("GLOBAL", -1, false, true, false);
-	public static final char UNRAW = '%', RAW = '$', REF = '@', RAW_CONTENTS = '&';
-	/** unraw, raw, ref, rcont */
-	public static final String[] VALID_VAR_MODS = new String[] { "" + UNRAW, "" + RAW, "" + REF, "" + RAW_CONTENTS };
+	public static final char UNRAW = '%', RAW = '$', REF = '@', RAW_CONTENTS = '&', UNPACK = '^';
+	public static final String UNPACK_REC = "" + UNPACK + UNPACK;
+	/** unraw, raw, ref, rcont, unpack_rec, unpack */
+	public static final String[] VALID_VAR_MODS = new String[] { "" + UNRAW, "" + RAW, "" + REF, "" + RAW_CONTENTS, UNPACK_REC, "" + UNPACK };
 	
 	public static final String ILLEGAL_VAR_REG_EX = "[^\\w\\-]";
 	public static final Pattern ILLEGAL_VAR_MATCHER = Pattern.compile(ILLEGAL_VAR_REG_EX);
+	
+	public static final String LEGAL_ANON_SCOPE_REG_EX = "[\\{\\}]" + LABEL_MODS_REG.substring(0, LABEL_MODS_REG.length() - 1) + "*";
+	public static final Pattern LEGAL_ANON_SCOPE_MATCHER = Pattern.compile(LEGAL_ANON_SCOPE_REG_EX);
 	
 	public static final String PARENTH_REG_EX = "[" + quote(TOK_S) + quote(TOK_E) + "]";
 	public static final Pattern PARENTH_MATCHER = Pattern.compile(PARENTH_REG_EX);
@@ -121,6 +123,7 @@ public class Script
 	public String path;
 	public String name = "BASE";
 	public final String[] lines;
+	public final HashMap<Integer, Label> anonScope;
 	private Scanner keyIn;
 	public final Robot rob;
 	private AtomicBoolean forceKill = new AtomicBoolean(false);
@@ -1009,10 +1012,6 @@ public class Script
 			return out;
 		}
 	}).setVarArgs();
-	public static final Command UNPACK = add("unpack", arrayReturnDispl(TOKEN), "Unpacks the given single token into its component tokens.", CmdArg.TOKEN).setFunc((ctx, objs) ->
-	{
-		return unpack((String) objs[0]);
-	});
 	public static final Command RUN_SCRIPT = add("run_script", Script.VOID, "Runs the given script. Booleans determine whether variables in this script will be given to other before being run, and whether variables in other will be pulled to this script once finished.", CmdArg.STRING, CmdArg.BOOLEAN, CmdArg.BOOLEAN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
 	{
 		String name = (String) objs[0];
@@ -1344,6 +1343,8 @@ public class Script
 	}
 	private static boolean syntaxCheck(String line)
 	{
+		if (LEGAL_ANON_SCOPE_MATCHER.matcher(line).matches())
+			return true;
 		QTRACK.reset();
 		SYNTRACK.reset();
 		for (int i = 0; i < line.length(); i++)
@@ -1552,11 +1553,11 @@ public class Script
 	
 	private static boolean startsWith(String str, char c)
 	{
-		return str.length() > 1 && str.charAt(0) == c;
+		return str.length() > 0 && str.charAt(0) == c;
 	}
 	private static boolean endsWith(String str, char c)
 	{
-		return str.length() > 1 && str.charAt(str.length() - 1) == c;
+		return str.length() > 0 && str.charAt(str.length() - 1) == c;
 	}
 	
 	public static String unpack(String token)
@@ -1642,18 +1643,12 @@ public class Script
 	public MixedPair<String[], ScajlVariable[]> tokVarPair(IntPredicate tokenRawDefault, boolean unresolved, String... tokens)
 	{
 		ScajlVariable[] vars = new ScajlVariable[tokens.length];
-		Ind ind = new Ind(0);
-		int tokInd = 0;
-		for (int i = 0; i < vars.length; i = ind.get())
-		{
-			final int ii = i;
-			ScajlVariable var = getVar(tokens[tokInd++], tokenRawDefault.test(ii));
-			ScajlVariable[] toInsert = var.splitTokens((splInd) -> tokenRawDefault.test(ii + splInd), this);
-			vars = AUtils.replace(vars, toInsert, i, ind);
-		}
-		tokens = new String[vars.length];
 		for (int i = 0; i < vars.length; i++)
+		{
+			ScajlVariable var = getVar(tokens[i], tokenRawDefault.test(i));
+			vars[i] = var;
 			tokens[i] = !unresolved ? vars[i].val(this) : vars[i].raw();
+		}
 		return new MixedPair<>(tokens, vars);
 	}
 	
@@ -1689,7 +1684,6 @@ public class Script
 	}
 	
 	
-	private final ArrayDeque<String> bufferedPEs = new ArrayDeque<>();
 	private RunnableCommand parse(String line, CmdHead head, Bool breakIf)
 	{
 		String[] argStrs = argsOf(line);
@@ -1728,76 +1722,53 @@ public class Script
 						
 						CmdArg<?> arg = args[varArgInd];
 						final CmdArg<?> origArg = arg;
-						boolean firstGo = true;
-						LinkedHashMap<String, CmdArg<?>> bin = CmdArg.ARGS.get(arg.cls);
-						Iterator<CmdArg<?>> binIt = bin == null ? null : bin.values().iterator();
+						LinkedHashMap<Integer, CmdArg<?>> bin = CmdArg.ARGS.get(arg.cls);
 						
 						String[] tokenSource = tokensOf(argStrs[argInd]);
-						
 						String tokenSourceStr = StringUtils.toString(tokenSource, "", " ", "");
+						tokenSource = ScajlVariable.preParse(tokenSource, this);
+						
 						Object obj = null;
 						
-						bufferedPEs.clear();
-						do
+						String trimmed = "";
+						if (!varArgArray)
 						{
-							if (arg == origArg && !firstGo)
-								continue;
-							firstGo = false;
-							String trimmed = "";
-							if (!varArgArray)
-							{
-								int count = arg.tokenCount();
-								final CmdArg<?> aarg = arg;
-								MixedPair<String[], ScajlVariable[]> tokVarPair = tokVarPair((i) -> cmd.rawArg[varArgInd] || aarg.rawToken(i), aarg instanceof VarCmdArg, tokenSource);
-								String[] tokens = tokVarPair.a();
-								trimmed = StringUtils.toString(tokens, "", " ", "");
-								ScajlVariable[] vars = tokVarPair.b();
-								if (tokens.length != count)
-								{
-									bufferedPEs.push(getParseExceptString("Invalid token count for CmdArg format '" + arg.type + "'", line, "Format requires " + count + " tokens, but " + tokens.length + " have been provided. Tokens are separated by spaces. From tokens: " + tokenSourceStr));
-									continue;
-								}
-								
-								obj = arg.parse(tokens, vars, 0, this);
-								
-								if (obj == null && !cmd.nullableArg(varArgInd))
-								{
-									bufferedPEs.push(getParseExceptString("Invalid token resolution", trimmed, "Expected type: " + arg.type + ". From tokens: " + tokenSourceStr));
-									continue;
-								}
-									
-								
-								if (!atVA)
-									objs[argInd] = obj;
-								else
-									((Object[]) objs[objs.length - 1])[argInd - args.length + 1] = obj;
-							}
+							if (arg.tokenCount() != tokenSource.length)
+								arg = bin.get(tokenSource.length);
+							if (arg == null || arg.tokenCount() != tokenSource.length)
+								parseExcept("Invalid token count for CmdArg format '" + origArg.type + "'", line, "Format requires " + origArg.tokenCount() + " tokens, but " + tokenSource.length + " have been provided. Tokens are separated by spaces. From tokens: " + tokenSourceStr);
+							
+							final CmdArg<?> aarg = arg;
+							MixedPair<String[], ScajlVariable[]> tokVarPair = tokVarPair((i) -> cmd.rawArg[varArgInd] || aarg.rawToken(i), aarg instanceof VarCmdArg, tokenSource);
+							String[] tokens = tokVarPair.a();
+							trimmed = StringUtils.toString(tokens, "", " ", "");
+							ScajlVariable[] vars = tokVarPair.b();
+							
+							obj = arg.parse(tokens, vars, 0, this);
+							
+							if (obj == null && !cmd.nullableArg(varArgInd))
+								parseExcept("Invalid token resolution", trimmed, "Expected type: " + arg.type + ". From tokens: " + tokenSourceStr);
+							
+							if (!atVA)
+								objs[argInd] = obj;
 							else
-							{
-								final CmdArg<?> arrArg = cmd.variadic, aarg = arg;
-								MixedPair<String[], ScajlVariable[]> tokVarPair = tokVarPair((i) -> cmd.rawArg[varArgInd] || aarg.rawToken(i), aarg instanceof VarCmdArg, tokenSource);
-								String[] tokens = tokVarPair.a();
-								ScajlVariable[] vars = tokVarPair.b();
-								trimmed = tokens[0];
-								obj = arrArg.parse(tokens, vars, 0, this);
-								if (obj == null && !cmd.nullableArg(argInd))
-								{
-									bufferedPEs.push(getParseExceptString("Invalid var-arg array resolution", trimmed, tokens[0]));
-									continue;
-								}
-								
-								objs[objs.length - 1] = obj;
-							}
-							if (obj != null)
-								input += trimmed + (argInd == argStrs.length - 1 ? "" : ", ");
-						} while (obj == null && binIt != null && binIt.hasNext() && (arg = binIt.next()) != null);
-						if (obj == null && !cmd.nullableArg(varArgInd))
-						{
-							String pe = "Invalid argument resolution for arg " + (argInd + 1) + ". Encountered the following problems for subsequent parse formats: ";
-							for (String str : bufferedPEs)
-								pe += "\n    " + str;
-							throw new CommandParseException(pe);
+								((Object[]) objs[objs.length - 1])[argInd - args.length + 1] = obj;
 						}
+						else
+						{
+							final CmdArg<?> arrArg = cmd.variadic, aarg = arg;
+							MixedPair<String[], ScajlVariable[]> tokVarPair = tokVarPair((i) -> false, aarg instanceof VarCmdArg, tokenSource);
+							String[] tokens = tokVarPair.a();
+							ScajlVariable[] vars = tokVarPair.b();
+							trimmed = tokens[0];
+							obj = arrArg.parse(tokens, vars, 0, this);
+							if (obj == null && !cmd.nullableArg(argInd))
+								parseExcept("Invalid var-arg array resolution", trimmed, tokens[0]);
+							
+							objs[objs.length - 1] = obj;
+						}
+						if (obj != null)
+							input += trimmed + (argInd == argStrs.length - 1 ? "" : ", ");
 					}
 	
 					RunnableCommand run = new RunnableCommand(cmd, input, objs);
@@ -1845,13 +1816,22 @@ public class Script
 		path = null;
 		String str = "";
 		int num = 0;
+		int anonScopeId = 0;
+		Pattern noScope = Pattern.compile("\\" + SCOPE_S + "+");
 		multilineComment = false;
 		ArrayList<Integer> merges = new ArrayList<Integer>();
+		anonScope = new HashMap<>();
 		while (scan.hasNextLine())
 		{
 			String line = stripComments(scan.nextLine());
 			if (line.startsWith(LABEL) || line.startsWith(SCOPED_LABEL))
 				putLabel(firstToken(line), num);
+			else if (startsWith(line, SCOPE_S))
+			{
+				Label anon = new Label(SCOPED_LABEL + noScope.matcher(line).replaceFirst("") + "ANON" + anonScopeId++, num);
+				labels.put(anon.name, anon);
+				anonScope.put(num, anon);
+			}
 			else if (line.startsWith(END_SCRIPT))
 				break;
 			else if (line.endsWith(END_SCRIPT))
@@ -1933,15 +1913,18 @@ public class Script
 				labelsDeep++;
 			else if (labelsDeep == 0)
 			{
-				if (line.trim().equals(HELP_CHAR_STR))
-				{
+				if (line.equals(HELP_CHAR_STR))
 					PRINT_COMMANDS.func.cmd(this, (Object[]) null);
-					parseLine++;
-					continue;
+				else if (startsWith(line, SCOPE_S))
+					scope.push(anonScope.get(parseLine));
+				else if (endsWith(line, SCOPE_E))
+					scope.pop();
+				else
+				{
+					CommandResult res = runExecutable(line, breakIf);
+					if (res.shouldBreak)
+						break;
 				}
-				CommandResult res = runExecutable(line, breakIf);
-				if (res.shouldBreak)
-					break;
 			}
 			else if (new CmdHead(firstToken(line)).name.equals(RETURN.name))
 				labelsDeep--;
@@ -2067,19 +2050,11 @@ public class Script
 	}
 	public static String arrayTrim(String token)
 	{
-		String str = token.trim();
-			str = str.substring(1);
-			if (str.startsWith("" + ARR_S))
-		if (str.endsWith("" + ARR_E))
-			str = str.substring(0, str.length() - 1);
-		return str;
+		return unpack(token.trim(), ARR_S, ARR_E);
 	}
 	public static String executableTrim(String token)
 	{
-		String str = token.trim();
-		if (str.startsWith("" + SCOPE_S) && str.endsWith("" + SCOPE_E))
-			return str.substring(1, str.length() - 1).trim();
-		return str;
+		return unpack(token.trim(), SCOPE_S, SCOPE_E);
 	}
 	public static String stringTrim(String string)
 	{
