@@ -1,5 +1,6 @@
 package commands;
 
+import java.lang.ref.WeakReference;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -20,16 +21,18 @@ public abstract class ScajlVariable
 	///////////////////////////
 	
 	public final String input, modless;
+	protected WeakReference<SVMember> selfCtx;
 	
-	public ScajlVariable(String input, String modless)
+	public ScajlVariable(String input, String modless, SVMember selfCtx)
 	{
 		this.input = input;
 		this.modless = modless;
+		this.selfCtx = new WeakReference<>(selfCtx);
 	}
 	
 	public abstract String val(Script ctx);
 	public abstract String raw();
-	public VarCtx varCtx(String[] memberAccess, int off, boolean put, Script ctx)
+	public VarCtx varCtx(String[] memberAccess, int off, boolean put, Script ctx, SVMember selfCtx)
 	{
 		if (put || memberAccess != null && off != memberAccess.length)
 			ctx.parseExcept("Invalid member access", "The indexed variable is not a type which can be indexed.", "From access: " + StringUtils.toString(memberAccess, "", "" + Script.ARR_ACCESS, ""));
@@ -62,7 +65,7 @@ public abstract class ScajlVariable
 	{
 		public SVVal(String input, String modless)
 		{
-			super(input, modless);
+			super(input, modless, null);
 		}
 		
 		public SVVal(String inputModless)
@@ -98,7 +101,7 @@ public abstract class ScajlVariable
 	{
 		public SVRef(String input, String modless)
 		{
-			super(input, modless);
+			super(input, modless, null);
 		}
 		
 		@Override
@@ -127,7 +130,7 @@ public abstract class ScajlVariable
 		
 		public SVString(String input, String modless)
 		{
-			super(input, modless);
+			super(input, modless, null);
 			unraw = Script.stringTrim(modless);
 		}
 		
@@ -154,59 +157,68 @@ public abstract class ScajlVariable
 	{
 		public final String name;
 		
-		public SVMember(String input, String modless, String name)
+		public SVMember(String input, String modless, String name, SVMember selfCtx)
 		{
-			super(input, modless);
+			super(input, modless, selfCtx);
 			this.name = name;
 		}
 		
 		@Override
 		public String val(Script ctx)
 		{
-			return name == null ? raw() : name;
+			return name == null ? raw() : raw();
 		}
 		
 		@Override
-		public abstract VarCtx varCtx(String[] memberAccess, int off, boolean put, Script ctx);
+		public abstract VarCtx varCtx(String[] memberAccess, int off, boolean put, Script ctx, SVMember selfCtx);
 	}
 	
 	public static class SVMap extends SVMember
 	{
 		private LinkedHashMap<String, ScajlVariable> map;
 		
-		public SVMap(String input, String modless, String name, Script ctx)
+		public SVMap(String input, String modless, String name, Script ctx, SVMember selfCtx)
 		{
-			super(input, modless, name);
+			super(input, modless, name, selfCtx);
 			String[] elements = Script.arrayElementsOf(modless);
 			map = new LinkedHashMap<>(elements.length);
 			for (int i = 0; i < elements.length; i++)
 			{
 				String[] keyVal = Script.syntaxedSplit(elements[i], Script.MAP_KEY_EQ);
-				String key = getVar(keyVal[0], true, ctx).val(ctx);
-				map.put(key, getVar(keyVal[1], false, ctx));
+				String key = getVar(keyVal[0], true, ctx, this).val(ctx);
+				map.put(key, getVar(keyVal[1], false, ctx, this));
 			}
 		}
-		public SVMap(String input, String modless, String name, LinkedHashMap<String, ScajlVariable> map)
+		public SVMap(String input, String modless, String name, LinkedHashMap<String, ScajlVariable> map, SVMember selfCtx)
 		{
-			super(input, modless, name);
+			super(input, modless, name, selfCtx);
 			this.map = map;
 		}
 
 		@Override
-		public VarCtx varCtx(String[] memberAccess, int off, boolean put, Script ctx)
+		public VarCtx varCtx(String[] memberAccess, int off, boolean put, Script ctx, SVMember selfCtx)
 		{
-			if (memberAccess[off].equals(Script.ARR_LEN) && off == memberAccess.length - 1)
-				return new VarCtx(() -> new SVVal(map.size()));
-			else if (off == memberAccess.length - 1)
-				return new VarCtx(() ->
-				{
-					if (!map.containsKey(memberAccess[off]))
-						return NULL;
-					return map.get(memberAccess[off]);
-				}, (var) -> map.put(memberAccess[off], var));
+			if (off == memberAccess.length - 1)
+			{
+				if (memberAccess[off].equals(Script.ARR_LEN))
+					return new VarCtx(() -> new SVVal(map.size()));
+				else
+					return new VarCtx(() ->
+					{
+						if (!map.containsKey(memberAccess[off]))
+							return NULL;
+						return map.get(memberAccess[off]);
+					}, (var) ->
+					{
+						map.put(memberAccess[off], var);
+						var.selfCtx = new WeakReference<>(this);
+					});
+			}
+			if (memberAccess[off].equals(Script.ARR_SELF))
+				return selfCtx.varCtx(memberAccess, off + 1, put, ctx, this);
 			if (!map.containsKey(memberAccess[off]))
 				ctx.parseExcept("Invalid Map key for continued indexing: " + memberAccess[off], "The specified key is missing.", "From access: " + StringUtils.toString(memberAccess, "", "" + Script.ARR_ACCESS, ""));
-			return map.get(memberAccess[off]).varCtx(memberAccess, off + 1, put, ctx);
+			return map.get(memberAccess[off]).varCtx(memberAccess, off + 1, put, ctx, this);
 		}
 
 		@Override
@@ -222,13 +234,21 @@ public abstract class ScajlVariable
 			return out + Script.ARR_E;
 		}
 
-		@SuppressWarnings("unchecked")
 		@Override
 		public ScajlVariable clone()
 		{
-			return new SVMap(input, modless, null, (LinkedHashMap<String, ScajlVariable>) map.clone());
+			LinkedHashMap<String, ScajlVariable> deepCopy = new LinkedHashMap<>();
+			SVMap clone = new SVMap(input, modless, null, deepCopy, selfCtx.get());
+			Iterator<Entry<String, ScajlVariable>> it = map.entrySet().iterator();
+			while (it.hasNext())
+			{
+				Entry<String, ScajlVariable> ent = it.next();
+				ScajlVariable cop;
+				deepCopy.put(ent.getKey(), cop = ent.getValue().clone());
+				cop.selfCtx = new WeakReference<>(clone);
+			}
+			return clone;
 		}
-		
 	}
 	
 	public static class SVTokGroup extends SVMember
@@ -237,7 +257,7 @@ public abstract class ScajlVariable
 
 		public SVTokGroup(String input, String modless, Script ctx)
 		{
-			super(input, modless, null);
+			super(input, modless, null, null);
 			String[] elements = Script.tokensOf(Script.unpack(modless));
 			array = new ScajlVariable[elements.length];
 			for (int i = 0; i < elements.length; i++)
@@ -245,7 +265,7 @@ public abstract class ScajlVariable
 		}
 		public SVTokGroup(String input, String modless, ScajlVariable[] array)
 		{
-			super(input, modless, null);
+			super(input, modless, null, null);
 			this.array = array;
 		}
 		
@@ -259,15 +279,15 @@ public abstract class ScajlVariable
 		}
 		
 		@Override
-		public SVArray clone()
+		public SVTokGroup clone()
 		{
-			return new SVArray(input, modless, null, Arrays.copyOf(array, array.length));
+			return new SVTokGroup(input, modless, Arrays.copyOf(array, array.length));
 		}
 		@Override
-		public VarCtx varCtx(String[] memberAccess, int off, boolean put, Script ctx)
+		public VarCtx varCtx(String[] memberAccess, int off, boolean put, Script ctx, SVMember selfCtx)
 		{
 			if (put || memberAccess != null && off != memberAccess.length)
-				ctx.parseExcept("Invalid member access", "The indexed variable is not a type which can be indexed.", "From access: " + StringUtils.toString(memberAccess, "", "" + Script.ARR_ACCESS, ""));
+				ctx.parseExcept("Invalid member access on Token Group", "The indexed variable is not a type which can be indexed.", "From access: " + StringUtils.toString(memberAccess, "", "" + Script.ARR_ACCESS, ""));
 			return new VarCtx(() -> this);
 		}
 	}
@@ -277,24 +297,25 @@ public abstract class ScajlVariable
 		private ScajlVariable[] array;
 		private SVVal length;
 		
-		public SVArray(String input, String modless, String name, Script ctx)
+		public SVArray(String input, String modless, String name, Script ctx, SVMember selfCtx)
 		{
-			super(input, modless, name);
+			super(input, modless, name, selfCtx);
 			String[] elements = Script.arrayElementsOf(modless);
 			array = new ScajlVariable[elements.length];
+			Arrays.fill(array, NULL);
 			for (int i = 0; i < elements.length; i++)
-				array[i] = getVar(elements[i], false, ctx);
+				array[i] = getVar(elements[i], false, ctx, this);
 			length = new SVVal(array.length);
 		}
-		public SVArray(String input, String modless, String name, ScajlVariable[] array)
+		public SVArray(String input, String modless, String name, ScajlVariable[] array, SVMember selfCtx)
 		{
-			super(input, modless, name);
+			super(input, modless, name, selfCtx);
 			this.array = array;
 			length = new SVVal(array.length);
 		}
-		public SVArray(String name, ScajlVariable[] array)
+		public SVArray(String name, ScajlVariable[] array, SVMember selfCtx)
 		{
-			this(name, name, name, array);
+			this(name, name, name, array, selfCtx);
 		}
 
 		@Override
@@ -307,7 +328,7 @@ public abstract class ScajlVariable
 		}
 		
 		@Override
-		public VarCtx varCtx(String[] memberAccess, int off, boolean put, Script ctx)
+		public VarCtx varCtx(String[] memberAccess, int off, boolean put, Script ctx, SVMember selfCtx)
 		{
 			if (memberAccess[off].equals(Script.ARR_LEN) && off == memberAccess.length - 1)
 				return new VarCtx(() -> length, (var) ->
@@ -323,35 +344,48 @@ public abstract class ScajlVariable
 				});
 			else
 			{
+				if (memberAccess[off].equals(Script.ARR_SELF))
+					return varCtx(memberAccess, off + 1, put, ctx, this);
 				Integer ind = CmdArg.INT.parse(memberAccess[off]);
 				if (ind == null)
 					ctx.parseExcept("Invalid Array index: " + memberAccess[off], "Array indices must be numbers.", "From access: " + StringUtils.toString(memberAccess, "", "" + Script.ARR_ACCESS, ""));
 				if (ind >= array.length)
 					ctx.parseExcept("Invalid Array index: " + ind, "Index out of bounds.", "From access: " + StringUtils.toString(memberAccess, "", "" + Script.ARR_ACCESS, ""));
 				if (off == memberAccess.length - 1)
-					return new VarCtx(() -> array[ind], (var) -> array[ind] = var);
-				return array[ind].varCtx(memberAccess, off + 1, put, ctx);
+					return new VarCtx(() -> array[ind], (var) ->
+					{
+						array[ind] = var;
+						var.selfCtx = new WeakReference<>(this);
+					});
+				return array[ind].varCtx(memberAccess, off + 1, put, ctx, this);
 			}
 		}
 		
 		@Override
 		public SVArray clone()
 		{
-			return new SVArray(input, modless, null, Arrays.copyOf(array, array.length));
+			ScajlVariable[] deepCopy = Arrays.copyOf(array, array.length);
+			SVArray clone = new SVArray(input, modless, null, deepCopy, selfCtx.get());
+			for (int i = 0; i < deepCopy.length; i++)
+			{
+				deepCopy[i] = deepCopy[i].clone();
+				deepCopy[i].selfCtx = new WeakReference<>(clone);
+			}
+			return clone;
 		}
 	}
 	
 	public static class SVExec extends ScajlVariable
 	{
-		public SVExec(String input, String modless)
+		public SVExec(String input, String modless, SVMember selfCtx)
 		{
-			super(input, modless);
+			super(input, modless, selfCtx);
 		}
 
 		@Override
 		public String val(Script ctx)
 		{
-			return ctx.runExecutable(modless).output;
+			return ctx.runExecutable(modless, selfCtx.get()).output;
 		}
 
 		@Override
@@ -363,13 +397,17 @@ public abstract class ScajlVariable
 		@Override
 		public SVExec clone()
 		{
-			return new SVExec(input, modless);
+			return new SVExec(input, modless, selfCtx.get());
 		}
 	}
 	
 	////////////////////////
 	
 	public static void putVar(String name, ScajlVariable var, Script ctx)
+	{
+		putVar(name, var, ctx, null);
+	}
+	public static void putVar(String name, ScajlVariable var, Script ctx, SVMember selfCtx)
 	{
 		String[] arrAcc = Script.syntaxedSplit(name, "" + Script.ARR_ACCESS);
 		ScajlVariable toVar = getVar(arrAcc[0], arrAcc.length == 1, ctx);
@@ -379,7 +417,7 @@ public abstract class ScajlVariable
 			for (int i = 0; i < access.length; i++)
 				if (i > 0)
 					access[i] = getVar(arrAcc[i], false, ctx).val(ctx);
-			toVar.varCtx(access, 1, true, ctx).put.accept(var);
+			toVar.varCtx(access, 1, true, ctx, selfCtx).put.accept(var);
 		}
 		else
 		{
@@ -435,6 +473,10 @@ public abstract class ScajlVariable
 	
 	public static ScajlVariable getVar(String input, boolean rawDef, Script ctx)
 	{
+		return getVar(input, rawDef, ctx, null);
+	}
+	public static ScajlVariable getVar(String input, boolean rawDef, Script ctx, SVMember selfCtx)
+	{
 		if (input.equals(Script.NULL))
 			return NULL;
 		
@@ -464,12 +506,12 @@ public abstract class ScajlVariable
 				for (int i = 0; i < access.length; i++)
 				{
 					if (i > 0)
-						access[i] = getVar(arrAcc[i], false, ctx).val(ctx);
+						access[i] = getVar(arrAcc[i], false, ctx, selfCtx).val(ctx);
 					else
-						var = getVar(arrAcc[0], false, ctx);
+						var = getVar(arrAcc[0], false, ctx, selfCtx);
 				}
 				
-				return var.varCtx(access, 1, false, ctx).get.get();
+				return var.varCtx(access, 1, false, ctx, selfCtx).get.get();
 			}
 		}
 		
@@ -497,26 +539,34 @@ public abstract class ScajlVariable
 			ctx.parseExcept("Invalid executable modifier", "An Executable can only be modified with the 'reference' reference modifier '" + Script.REF + "'.");
 		
 		if (isExec && !isRef)
-			return getVar(ctx.runExecutable(modless).output, false, ctx);
+			return getVar(ctx.runExecutable(modless, selfCtx).output, false, ctx, selfCtx);
 		
 		if (isString)
 			return new SVString(input, modless);
 		if (isArray)
-			return new SVArray(input, modless, null, ctx);
+			return new SVArray(input, modless, null, ctx, selfCtx);
 		if (isGroup)
 			return new SVTokGroup(input, modless, ctx);
 		if (isMap)
-			return new SVMap(input, modless, null, ctx);
+			return new SVMap(input, modless, null, ctx, selfCtx);
 		if (isRaw)
 			return new SVVal(input, modless);
 		if (isRef)
 		{
 			if (isExec)
-				return new SVExec(input, modless);
+				return new SVExec(input, modless, selfCtx);
 			if (Script.ILLEGAL_VAR_MATCHER.matcher(modless).matches())
 				ctx.parseExcept("Illegal characters in reference name", "The reference name must be a legal variable name.");
 			return new SVRef(input, modless);
 		}
+		if (modless.equals(Script.ARR_SELF))
+		{
+			if (selfCtx != null)
+				return selfCtx;
+			else
+				ctx.parseExcept("Illegal usage of the 'self' keyword.", "'self' can only be used within Container types.");
+		}
+		
 		
 		ScajlVariable var = ctx.scope.get(modless);
 		if (var == null)

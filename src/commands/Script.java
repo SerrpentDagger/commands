@@ -43,6 +43,7 @@ import commands.ParseTracker.MultiTracker;
 import commands.ParseTracker.RepeatTracker;
 import commands.ParseTracker.WrapTracker;
 import commands.ScajlVariable.SVArray;
+import commands.ScajlVariable.SVMember;
 import commands.Scope.SNode;
 import commands.libs.Bool;
 import commands.libs.BuiltInLibs;
@@ -80,7 +81,7 @@ public class Script
 	public static final char ARR_S = '[', ARR_E = ']', ARR_ACCESS = '.', ARR_SEP = ';';
 	public static final char TOK_S = '(', TOK_E = ')', SCOPE_S = '{', SCOPE_E = '}';
 	public static final char MAP_KEY_EQ = '=';
-	public static final String ARR_LEN = "len";
+	public static final String ARR_LEN = "len", ARR_SELF = "self";
 	public static final char STRING_CHAR = '"';
 	public static final char ESCAPE_CHAR = '\\';
 	public static final char HELP_CHAR = '?';
@@ -615,7 +616,7 @@ public class Script
 			ScajlVariable[] arr = new ScajlVariable[set.i];
 			Arrays.setAll(arr, (i) -> set.set.clone());
 			
-			ctx.putVar(set.var, new SVArray(set.var, arr));
+			ctx.putVar(set.var, new SVArray(set.var, arr, null));
 		}
 		
 		return ctx.prev();
@@ -635,10 +636,10 @@ public class Script
 			{
 				ctx.putVar(INDEX, "" + i);
 				ctx.runFrom(lab);
-				elements[i] = ctx.getVar(PREVIOUS, false);
+				elements[i] = ctx.getVar(PREVIOUS, false, null);
 			}
 			ctx.putVar(INDEX, "" + count);
-			ctx.putVar(set.var, new SVArray(set.var, elements));
+			ctx.putVar(set.var, new SVArray(set.var, elements, null));
 		}
 		return ctx.prev();
 	}).setVarArgs();
@@ -663,7 +664,7 @@ public class Script
 		String[] vars = (String[]) objs[0];
 		for (String var : vars)
 		{
-			ScajlVariable val = ctx.getVar(var, false);
+			ScajlVariable val = ctx.getVar(var, false, null);
 			if (val == null || CmdArg.DOUBLE.parse(val.val(ctx)) == null)
 				return FALSE;
 		}
@@ -957,7 +958,7 @@ public class Script
 		if (lab == null)
 			ctx.parseExcept("Invalid label specification", (String) objs[1], "No label found.");
 		int ind = 0;
-		while (ctx.valParse(CmdArg.BOOLEAN, ctx.lines[wL], (String) objs[0]))
+		while (ctx.valParse(CmdArg.BOOLEAN, ctx.lines[wL], null, (String) objs[0]))
 		{
 			ctx.putVar(INDEX, "" + ind);
 			ind++;
@@ -1579,12 +1580,6 @@ public class Script
 			return toUnp.substring(1, toUnp.length() - 1);
 		return toUnp;
 	}
-	private static String unpack(String toUnp, String start, String end)
-	{
-		if (toUnp.startsWith(start) && toUnp.endsWith(end))
-			return toUnp.substring(start.length(), toUnp.length() - end.length());
-		return toUnp;
-	}
 	
 	public static String tokenize(String... objs)
 	{
@@ -1603,9 +1598,9 @@ public class Script
 	
 	///////////
 	
-	public ScajlVariable getVar(String input, boolean rawDefault)
+	public ScajlVariable getVar(String input, boolean rawDefault, SVMember selfCtx)
 	{
-		return ScajlVariable.getVar(input, rawDefault, this);
+		return ScajlVariable.getVar(input, rawDefault, this, selfCtx);
 	}
 	
 	public void putVar(String input, String val)
@@ -1618,15 +1613,15 @@ public class Script
 		ScajlVariable.putVar(input, var, this);
 	}
 	
-	public <T> T valParse(CmdArg<T> arg, String line, String... tokens)
+	public <T> T valParse(CmdArg<T> arg, String line, SVMember selfCtx, String... tokens)
 	{
-		return valParse(arg, line, (i) -> false, tokens);
+		return valParse(arg, line, (i) -> false, selfCtx, tokens);
 	}
-	public <T> T valParse(CmdArg<T> arg, String line, IntPredicate tokenRawDefault, String... tokens)
+	public <T> T valParse(CmdArg<T> arg, String line, IntPredicate tokenRawDefault, SVMember selfCtx, String... tokens)
 	{
 		int count = arg.tokenCount();
 
-		MixedPair<String[], ScajlVariable[]> tokVarPair = tokVarPair(tokenRawDefault, arg instanceof VarCmdArg, tokens);
+		MixedPair<String[], ScajlVariable[]> tokVarPair = tokVarPair(tokenRawDefault, arg instanceof VarCmdArg, selfCtx, tokens);
 		tokens = tokVarPair.a();
 		ScajlVariable[] vars = tokVarPair.b();
 		
@@ -1640,12 +1635,12 @@ public class Script
 		
 		return obj;
 	}
-	public MixedPair<String[], ScajlVariable[]> tokVarPair(IntPredicate tokenRawDefault, boolean unresolved, String... tokens)
+	public MixedPair<String[], ScajlVariable[]> tokVarPair(IntPredicate tokenRawDefault, boolean unresolved, SVMember selfCtx, String... tokens)
 	{
 		ScajlVariable[] vars = new ScajlVariable[tokens.length];
 		for (int i = 0; i < vars.length; i++)
 		{
-			ScajlVariable var = getVar(tokens[i], tokenRawDefault.test(i));
+			ScajlVariable var = getVar(tokens[i], tokenRawDefault.test(i), selfCtx);
 			vars[i] = var;
 			tokens[i] = !unresolved ? vars[i].val(this) : vars[i].raw();
 		}
@@ -1684,7 +1679,7 @@ public class Script
 	}
 	
 	
-	private RunnableCommand parse(String line, CmdHead head, Bool breakIf)
+	private RunnableCommand parse(String line, CmdHead head, Bool breakIf, SVMember selfCtx)
 	{
 		String[] argStrs = argsOf(line);
 		if (line.length() > 0)
@@ -1695,7 +1690,7 @@ public class Script
 				if (cmd.isDisabled())
 					parseExcept("Disabled command", cmd.name);
 				breakIf.set(breakIf.get() && head.isInlineElse);
-				if (!breakIf.get() && (head.isInlineIf ? valParse(CmdArg.BOOLEAN, line, head.inlineIf) : true))
+				if (!breakIf.get() && (head.isInlineIf ? valParse(CmdArg.BOOLEAN, line, selfCtx, head.inlineIf) : true))
 				{
 					breakIf.set(true);
 					CmdArg<?>[] args = cmd.args;
@@ -1739,7 +1734,7 @@ public class Script
 								parseExcept("Invalid token count for CmdArg format '" + origArg.type + "'", line, "Format requires " + origArg.tokenCount() + " tokens, but " + tokenSource.length + " have been provided. Tokens are separated by spaces. From tokens: " + tokenSourceStr);
 							
 							final CmdArg<?> aarg = arg;
-							MixedPair<String[], ScajlVariable[]> tokVarPair = tokVarPair((i) -> cmd.rawArg[varArgInd] || aarg.rawToken(i), aarg instanceof VarCmdArg, tokenSource);
+							MixedPair<String[], ScajlVariable[]> tokVarPair = tokVarPair((i) -> cmd.rawArg[varArgInd] || aarg.rawToken(i), aarg instanceof VarCmdArg, selfCtx, tokenSource);
 							String[] tokens = tokVarPair.a();
 							trimmed = StringUtils.toString(tokens, "", " ", "");
 							ScajlVariable[] vars = tokVarPair.b();
@@ -1757,7 +1752,7 @@ public class Script
 						else
 						{
 							final CmdArg<?> arrArg = cmd.variadic, aarg = arg;
-							MixedPair<String[], ScajlVariable[]> tokVarPair = tokVarPair((i) -> false, aarg instanceof VarCmdArg, tokenSource);
+							MixedPair<String[], ScajlVariable[]> tokVarPair = tokVarPair((i) -> false, aarg instanceof VarCmdArg, selfCtx, tokenSource);
 							String[] tokens = tokVarPair.a();
 							ScajlVariable[] vars = tokVarPair.b();
 							trimmed = tokens[0];
@@ -1915,13 +1910,13 @@ public class Script
 			{
 				if (line.equals(HELP_CHAR_STR))
 					PRINT_COMMANDS.func.cmd(this, (Object[]) null);
-				else if (startsWith(line, SCOPE_S))
+				else if (startsWith(line, SCOPE_S) && LEGAL_ANON_SCOPE_MATCHER.matcher(line).matches())
 					scope.push(anonScope.get(parseLine));
-				else if (endsWith(line, SCOPE_E))
+				else if (endsWith(line, SCOPE_E) && LEGAL_ANON_SCOPE_MATCHER.matcher(line).matches())
 					scope.pop();
 				else
 				{
-					CommandResult res = runExecutable(line, breakIf);
+					CommandResult res = runExecutable(line, breakIf, null);
 					if (res.shouldBreak)
 						break;
 				}
@@ -1931,11 +1926,11 @@ public class Script
 			parseLine++;
 		}
 	}
-	protected CommandResult runExecutable(String executableLine)
+	protected CommandResult runExecutable(String executableLine, SVMember selfCtx)
 	{
-		return runExecutable(executableLine, new Bool(false));
+		return runExecutable(executableLine, new Bool(false), selfCtx);
 	}
-	private CommandResult runExecutable(String executableLine, Bool breakIf)
+	private CommandResult runExecutable(String executableLine, Bool breakIf, SVMember selfCtx)
 	{
 		String line = executableTrim(executableLine);
 		if (line.isEmpty() || line.startsWith(LABEL) || line.startsWith(SCOPED_LABEL))
@@ -1967,14 +1962,14 @@ public class Script
 			int fur = 1;
 			boolean whil = false;
 			if (head.isInlineFor)
-				fur = valParse(CmdArg.INT, line, head.inlineFor);
+				fur = valParse(CmdArg.INT, line, selfCtx, head.inlineFor);
 			if (head.isInlineWhile)
-				whil = valParse(CmdArg.BOOLEAN, line, head.inlineWhile);
+				whil = valParse(CmdArg.BOOLEAN, line, selfCtx, head.inlineWhile);
 			if (head.isInlineFor || head.isInlineWhile)
 				putVar(INDEX, "0");
 			for (int f = 0; f < fur || (head.isInlineWhile && whil);)
 			{
-				RunnableCommand cmd = parse(line, head, breakIf);
+				RunnableCommand cmd = parse(line, head, breakIf, selfCtx);
 				if (cmd != null)
 				{
 					String out;
@@ -1993,7 +1988,7 @@ public class Script
 				if (head.isInlineFor || head.isInlineWhile)
 					putVar(INDEX, "" + f);				
 				if (head.isInlineWhile)
-					whil = valParse(CmdArg.BOOLEAN, line, head.inlineWhile);
+					whil = valParse(CmdArg.BOOLEAN, line, selfCtx, head.inlineWhile);
 			}
 			if (head.isInlineFor)
 				putVar(INDEX, "" + fur);
@@ -2046,7 +2041,7 @@ public class Script
 	
 	public String prev()
 	{
-		return getVar(PREVIOUS, false).raw();
+		return getVar(PREVIOUS, false, null).raw();
 	}
 	public static String arrayTrim(String token)
 	{
