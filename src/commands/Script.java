@@ -81,7 +81,7 @@ public class Script
 	public static final char ARR_S = '[', ARR_E = ']', ARR_ACCESS = '.', ARR_SEP = ';';
 	public static final char TOK_S = '(', TOK_E = ')', SCOPE_S = '{', SCOPE_E = '}';
 	public static final char MAP_KEY_EQ = '=';
-	public static final String ARR_LEN = "len", ARR_SELF = "self";
+	public static final String ARR_LEN = "len", ARR_SELF = "up";
 	public static final char STRING_CHAR = '"';
 	public static final char ESCAPE_CHAR = '\\';
 	public static final char HELP_CHAR = '?';
@@ -1316,7 +1316,7 @@ public class Script
 	private static final WrapTracker MCOMTRACK = new WrapTracker(MULTILINE_COMMENT_START, MULTILINE_COMMENT_END, ESCAPE_CHAR);
 	private static final RepeatTracker LCOMTRACK = new RepeatTracker(COMMENT_CHAR, ESCAPE_CHAR, 2);
 	private static final MultiTracker COMTRACK = new MultiTracker(MCOMTRACK, LCOMTRACK);
-	private static final MultiTracker SYNTRACK = new MultiTracker(ARRTRACK, PARTRACK, CURLTRACK);
+	private static final MultiTracker SYNTRACK = new MultiTracker(ARRTRACK, CURLTRACK, PARTRACK);
 	
 	private static boolean multilineComment = false;
 	private static String stripComments(String line)
@@ -1385,7 +1385,7 @@ public class Script
 			recent += parse;
 			if (recent.length() > trackLength)
 				recent = recent.substring(1);
-			if (pat.matcher(recent).matches())
+			if (!QTRACK.inside() && !SYNTRACK.insideOne() && pat.matcher(recent).matches())
 				return true;
 		}
 		return false;
