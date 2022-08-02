@@ -120,7 +120,7 @@ public class Command
 			inputArgs = input;
 		}
 		
-		public String run(Script ctx)
+		public ScajlVariable run(Script ctx)
 		{
 			return cmd.func.cmd(ctx, objs);
 		}
@@ -133,10 +133,10 @@ public class Command
 	
 	public static class CommandResult
 	{
-		public final String output;
+		public final ScajlVariable output;
 		public final boolean shouldBreak;
 		
-		public CommandResult(String out, boolean brk)
+		public CommandResult(ScajlVariable out, boolean brk)
 		{
 			output = out;
 			shouldBreak = brk;
@@ -146,6 +146,6 @@ public class Command
 	@FunctionalInterface
 	public static interface CmdFunc
 	{
-		public String cmd(Script ctx, Object... args);
+		public ScajlVariable cmd(Script ctx, Object... args);
 	}
 }

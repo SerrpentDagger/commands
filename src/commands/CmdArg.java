@@ -8,6 +8,8 @@ import java.util.LinkedHashMap;
 
 import commands.BooleanExp.Comp;
 import commands.DoubleExp.Oper;
+import commands.ScajlVariable.SVArray;
+import commands.ScajlVariable.SVJavObj;
 import utilities.ArrayUtils;
 
 public abstract class CmdArg<T>
@@ -83,7 +85,7 @@ public abstract class CmdArg<T>
 		public final CmdArg<TY> arg;
 		public TypeArg(Class<TY> type, CmdArg<TY> arg) { this.cl = type; this.arg = arg; }
 		@SuppressWarnings("unchecked")
-		public String castAndUnparse(Object obj) { return arg.unparse((TY) obj); }
+		public ScajlVariable castAndUnparse(Object obj) { return arg.unparse((TY) obj); }
 	}
 
 	/////////////////////////////////////////
@@ -143,9 +145,9 @@ public abstract class CmdArg<T>
 		return parse(trimmed, null, null);
 	}
 	
-	public String unparse(T obj)
+	public ScajlVariable unparse(T obj)
 	{
-		return obj.toString();
+		return Script.valOf(obj.toString());
 	}
 	
 	/////////////////////////
@@ -176,6 +178,12 @@ public abstract class CmdArg<T>
 		public VarCmdArg<T> reg()
 		{
 			return (VarCmdArg<T>) super.reg();
+		}
+		
+		@Override
+		public ScajlVariable unparse(T obj)
+		{
+			return Script.objOf(obj);
 		}
 	}
 	
@@ -247,7 +255,7 @@ public abstract class CmdArg<T>
 		}	
 	}.reg();
 	
-	public static final CmdArg<Object> OBJECT = new CmdArg<Object>("Object Type", Object.class)
+	public static final VarCmdArg<Object> OBJECT = new VarCmdArg<Object>("Object Type", Object.class)
 	{
 		@Override
 		public int tokenCount()
@@ -256,21 +264,54 @@ public abstract class CmdArg<T>
 		}
 		
 		@Override
-		public Object parse(String trimmed, String[] tokens, Script ctx)
+		public Object parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
 		{
-			if (!Script.isType(tokens[1]))
+			if (!Script.isType(vars[off + 1].val(ctx)))
 				return null;
+			if (!(vars[off] instanceof SVJavObj))
+				return null;
+			SVJavObj jObj = (SVJavObj) vars[off];
 			ScriptObject<?> so = Script.getType(tokens[1]);
-			return so.getObject(tokens[0]);
+			Object[] types = jObj.value;
+			CmdArg<?> arg = so.argOf();
+			for (Object obj : types)
+				if (arg.cls.isAssignableFrom(obj.getClass()))
+					return obj;
+			
+			return null;
 		}
 		
 		@Override
-		public String unparse(Object obj)
+		public ScajlVariable unparse(Object obj)
 		{
 			TypeArg<?> typeArg = getTypeArgFor(obj.getClass());
 			if (typeArg.arg == null || typeArg.arg == this)
-				return Script.NULL;
+				return ScajlVariable.NULL;
 			return typeArg.castAndUnparse(obj);
+		}
+	}.reg();
+	
+	public static final VarCmdArg<Object> OBJECT_NO_MULTICLASS = new VarCmdArg<Object>("Object", Object.class)
+	{
+		@Override
+		public Object parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
+		{
+			if (!(vars[off] instanceof SVJavObj))
+				return null;
+			SVJavObj jObj = (SVJavObj) vars[off];
+			Object[] types = jObj.value;
+			if (types.length > 1)
+			{
+				ctx.parseExcept("Invalid Object resolution", "The provided Object is multiclassed, so a specific Type must be given");
+				return null;
+			}
+			return types[0];
+		}
+		
+		@Override
+		public ScajlVariable unparse(Object obj)
+		{
+			return OBJECT.unparse(obj);
 		}
 	}.reg();
 
@@ -295,7 +336,7 @@ public abstract class CmdArg<T>
 		}
 		
 		@Override
-		public String unparse(Color obj)
+		public ScajlVariable unparse(Color obj)
 		{
 			return Script.tokenize(obj.getRed(), obj.getGreen(), obj.getBlue());
 		};
@@ -442,22 +483,48 @@ public abstract class CmdArg<T>
 		}
 	};
 	
-	@SuppressWarnings("rawtypes")
-	public static final CmdArg<ObjectType> SCRIPT_OBJECT = new CmdArg<ObjectType>("Object Type", ObjectType.class)
+	public static final VarCmdArg<ScajlVariable> SCAJL_VARIABLE = new VarCmdArg<ScajlVariable>("Variable", ScajlVariable.class)
 	{
 		@Override
-		public int tokenCount()
+		public ScajlVariable parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
 		{
-			return 2;
+			return vars[off];
 		}
 		
 		@Override
-		public ObjectType<?> parse(String trimmed, String[] tokens, Script ctx)
+		public ScajlVariable unparse(ScajlVariable obj)
 		{
-			if (!Script.isType(tokens[1]))
-				return null;
-			ScriptObject<?> so = Script.getType(tokens[1]);
-			return so.getObjectType(tokens[0]);
+			return obj;
+		}
+	}.reg();
+	
+	public static final VarCmdArg<SVArray> SVARRAY = new VarCmdArg<SVArray>("Array", SVArray.class)
+	{
+		@Override
+		public SVArray parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
+		{
+			return vars[off] instanceof SVArray ? (SVArray) vars[off] : null;
+		}
+
+		@Override
+		public ScajlVariable unparse(SVArray obj)
+		{
+			return obj;
+		}
+	}.reg();
+	
+	public static final VarCmdArg<SVJavObj> SVJAVOBJ = new VarCmdArg<SVJavObj>("Object", SVJavObj.class)
+	{
+		@Override
+		public SVJavObj parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
+		{
+			return vars[off] instanceof SVJavObj ? (SVJavObj) vars[off] : null;
+		}
+		
+		@Override
+		public ScajlVariable unparse(SVJavObj obj)
+		{
+			return obj;
 		}
 	};
 	
@@ -470,9 +537,9 @@ public abstract class CmdArg<T>
 		}
 		
 		@Override
-		public String unparse(String obj)
+		public ScajlVariable unparse(String obj)
 		{
-			return Script.STRING_CHAR + obj + Script.STRING_CHAR;
+			return Script.strOf(obj);
 		};
 	}.reg();
 	
@@ -493,26 +560,22 @@ public abstract class CmdArg<T>
 		}
 	}.reg();
 	
-	public static final CmdArg<BooleanThen> BOOLEAN_THEN = new CmdArg<BooleanThen>("Boolean Then", BooleanThen.class)
+	public static final VarCmdArg<BooleanThen> BOOLEAN_THEN = new VarCmdArg<BooleanThen>("Boolean Then", BooleanThen.class)
 	{
 		@Override
 		public int tokenCount()
 		{
 			return 2;
 		}
-		
+
 		@Override
-		public BooleanThen parse(String trimmed, String[] tokens, Script ctx)
+		public BooleanThen parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
 		{
-			BooleanThen b = new BooleanThen(BOOLEAN.parse(tokens, 0, ctx), TOKEN.parse(tokens, 1, ctx));
-			return b;
+			Boolean b = BOOLEAN.parse(vars[off].val(ctx));
+			if (b == null)
+				return null;
+			return new BooleanThen(b, vars[off + 1]);
 		}
-		
-		@Override
-		public String unparse(BooleanThen obj)
-		{
-			return Script.tokenize("" + obj.bool, obj.then);
-		};
 	}.reg();
 	
 	public static final CmdArg<BooleanExp> BOOLEAN_EXP = new CmdArg<BooleanExp>("Double Comparator Double", BooleanExp.class)
@@ -541,10 +604,10 @@ public abstract class CmdArg<T>
 		}
 		
 		@Override
-		public String unparse(BooleanExp obj)
+		public ScajlVariable unparse(BooleanExp obj)
 		{
 			return Script.tokenize("" + obj.a, obj.comp.display, "" + obj.b);
-		};
+		}
 	}.reg();
 	
 	public static final VarCmdArg<VarSet> VAR_SET = new VarCmdArg<VarSet>("VarName Value", VarSet.class)
@@ -572,12 +635,6 @@ public abstract class CmdArg<T>
 				return null;
 			return new VarSet(v, s);
 		}
-		
-		@Override
-		public String unparse(VarSet obj)
-		{
-			return Script.tokenize(obj.var, obj.set.raw());
-		};
 	}.reg();
 	
 	public static final VarCmdArg<BoolVarSet> BOOL_VAR_SET = new VarCmdArg<BoolVarSet>("Boolean VarName Value", BoolVarSet.class)
@@ -606,12 +663,6 @@ public abstract class CmdArg<T>
 			if (b == null || v == null || s == null)
 				return null;
 			return new BoolVarSet(b, v, s);
-		}
-		
-		@Override
-		public String unparse(BoolVarSet obj)
-		{
-			return Script.tokenize("" + obj.bool, obj.var, obj.set.raw());
 		}
 	}.reg();
 	
@@ -642,12 +693,6 @@ public abstract class CmdArg<T>
 				return null;
 			return new IntVarSet(i, v, s);
 		}
-		
-		@Override
-		public String unparse(IntVarSet obj)
-		{
-			return Script.tokenize("" + obj.i, obj.var, obj.set.raw());
-		};
 	}.reg();
 
 	public static final VarCmdArg<IntVarSet> VAR_INT_SET = new VarCmdArg<IntVarSet>("VarName Integer Value", IntVarSet.class)
@@ -677,12 +722,6 @@ public abstract class CmdArg<T>
 				return null;
 			return new IntVarSet(i, v, s);
 		}
-		
-		@Override
-		public String unparse(IntVarSet obj)
-		{
-			return Script.tokenize(obj.var, "" + obj.i, obj.set.raw());
-		};
 	};
 	
 	public static final CmdArg<VarIntTok> VAR_INT_TOK = new CmdArg<VarIntTok>("VarName Integer Token", VarIntTok.class)
@@ -712,21 +751,15 @@ public abstract class CmdArg<T>
 				return null;
 			return new VarIntTok(v, i, t);
 		}
-		
-		@Override
-		public String unparse(VarIntTok obj)
-		{
-			return Script.tokenize(obj.var, "" + obj.i, obj.tok);
-		};
 	}.reg();
 	
-	public static final CmdArg<int[]> INT_ARR = arrayOfPrimitives(int[].class);
-	public static final CmdArg<short[]> SHORT_ARR = arrayOfPrimitives(short[].class);
-	public static final CmdArg<byte[]> BYTE_ARR = arrayOfPrimitives(byte[].class);
-	public static final CmdArg<double[]> DOUB_ARR = arrayOfPrimitives(double[].class);
-	public static final CmdArg<float[]> FLOAT_ARR = arrayOfPrimitives(float[].class);
-	public static final CmdArg<boolean[]> BOOL_ARR = arrayOfPrimitives(boolean[].class);
-	public static final CmdArg<char[]> CHAR_ARR = arrayOfPrimitives(char[].class);
+	public static final VarCmdArg<int[]> INT_ARR = arrayOfPrimitives(int[].class);
+	public static final VarCmdArg<short[]> SHORT_ARR = arrayOfPrimitives(short[].class);
+	public static final VarCmdArg<byte[]> BYTE_ARR = arrayOfPrimitives(byte[].class);
+	public static final VarCmdArg<double[]> DOUB_ARR = arrayOfPrimitives(double[].class);
+	public static final VarCmdArg<float[]> FLOAT_ARR = arrayOfPrimitives(float[].class);
+	public static final VarCmdArg<boolean[]> BOOL_ARR = arrayOfPrimitives(boolean[].class);
+	public static final VarCmdArg<char[]> CHAR_ARR = arrayOfPrimitives(char[].class);
 	
 	////////////////////////////////////////
 	
@@ -744,7 +777,7 @@ public abstract class CmdArg<T>
 			pref = new PrefCmdArg<X>(prefix + " " + arg.type, arg.cls)
 			{
 				@Override
-				public String unparse(X obj)
+				public ScajlVariable unparse(X obj)
 				{
 					return arg.unparse(obj);
 				}
@@ -808,7 +841,7 @@ public abstract class CmdArg<T>
 			}
 			
 			@Override
-			public String unparse(T obj)
+			public ScajlVariable unparse(T obj)
 			{
 				return original.unparse(obj);
 			}
@@ -833,34 +866,35 @@ public abstract class CmdArg<T>
 		}.reg();
 	}
 	
-	private static <X> CmdArg<X> arrayOfPrimitives(Class<X> primArray)
+	private static <X> VarCmdArg<X> arrayOfPrimitives(Class<X> primArray)
 	{
 		Class<?> prim = primArray.componentType();
 		Class<?> wrapped = WRAP_PRIMITIVE.get(prim);
 		CmdArg<?> wrappedArg = getArgFor(wrapped);
 		@SuppressWarnings("unchecked")
-		CmdArg<X> array = new CmdArg<X>(Script.ARR_S + prim.getSimpleName() + Script.ARR_E, primArray)
+		VarCmdArg<X> array = new VarCmdArg<X>(Script.ARR_S + prim.getSimpleName() + Script.ARR_E, primArray)
 		{
 			@Override
-			public X parse(String trimmed, String[] tokns, Script ctx)
+			public X parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
 			{
-				if (!trimmed.startsWith("" + Script.ARR_S) || !trimmed.endsWith("" + Script.ARR_E))
+				if (!(vars[off] instanceof SVArray))
 					return null;
-				String[] tokens = Script.arrayElementsOf(trimmed);
-				X arr = (X) Array.newInstance(prim, tokens.length);
-				for (int i = 0; i < tokens.length; i++)
-					Array.set(arr, i, wrappedArg.parse(tokens[i].trim(), null, ctx));
+				SVArray array = (SVArray) vars[off];
+				ScajlVariable[] elements = array.getArray();
+				X arr = (X) Array.newInstance(prim, elements.length);
+				for (int i = 0; i < elements.length; i++)
+					Array.set(arr, i, wrappedArg.parse(elements[i].val(ctx).trim(), null, ctx));
 				return arr;
 			}
 			
 			@Override
-			public String unparse(X obj)
+			public ScajlVariable unparse(X obj)
 			{
-				String str = "" + Script.ARR_S;
 				int len = Array.getLength(obj);
+				ScajlVariable[] elements = new ScajlVariable[len];
 				for (int i = 0; i < len; i++)
-					str += Array.get(obj, i) + (i == len - 1 ? "" : Script.ARR_SEP + " ");
-				return str + Script.ARR_E;
+					elements[i] = Script.valOf("" + Array.get(obj, i));
+				return Script.arrOf(elements);
 			};
 		}.reg();
 		return array;
@@ -875,44 +909,41 @@ public abstract class CmdArg<T>
 		CmdArg<X[]> array = arrayBin == null ? null : (CmdArg<X[]>) arrayBin.get(1);
 		if (array == null)
 		{
-			array = new CmdArg<X[]>(Script.ARR_S + arg.type + Script.ARR_E, arrClass)
+			array = new VarCmdArg<X[]>(Script.ARR_S + arg.type + Script.ARR_E, arrClass)
 			{
 				//TODO: Array should be able to parse using differen CmdArgs.
+				//TODO: Array should be able to store and parse elements of more than one token.
 				@Override
-				public X[] parse(String trimmed, String[] tokens, Script ctx)
+				public X[] parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
 				{
-					if (!trimmed.startsWith("" + Script.ARR_S) || !trimmed.endsWith("" + Script.ARR_E))
+					if (!(vars[off] instanceof SVArray))
 						return null;
+					SVArray array = (SVArray) vars[off];
+					ScajlVariable[] elements = array.getArray();
 					int count = arg.tokenCount();
-					if (tokens.length % count != 0)
-						return null;
+					int xLen = elements.length;
 					
-					X first;
-					first = arg.parse(tokens, 0, ctx);
-					
-					if (first == null)
-						return null;
-					
-					int xLen = tokens.length / count;
-					X[] arr = (X[]) Array.newInstance(first.getClass(), xLen);
-					arr[0] = first;
-					for (int i = count; i < tokens.length; i += count)
+					X[] arr = (X[]) Array.newInstance(arg.cls, xLen);
+					ScajlVariable[] elmVars = new ScajlVariable[1];
+					for (int i = 0; i < elements.length; i++)
 					{
-						X val = arg.parse(tokens, i, ctx);
+						ScajlVariable elm = elements[i];
+						elmVars[0] = elm;
+						X val = arg instanceof VarCmdArg ? arg.parse(null, elmVars, 0, ctx) : arg.parse(elm.val(ctx));
 						if (val == null)
 							return null;
-						arr[i / count] = val;
+						arr[i] = val;
 					}
 					return arr;
 				}
 				
 				@Override
-				public String unparse(X[] obj)
+				public ScajlVariable unparse(X[] obj)
 				{
-					String[] elements = new String[obj.length];
+					ScajlVariable[] elements = new ScajlVariable[obj.length];
 					for (int i = 0; i < obj.length; i++)
 						elements[i] = arg.unparse(obj[i]);
-					return Script.toArrayString(elements);
+					return Script.arrOf(elements);
 				}
 			}.reg();
 		}

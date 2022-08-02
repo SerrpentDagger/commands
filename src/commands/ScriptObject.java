@@ -2,27 +2,22 @@ package commands;
 
 import java.lang.reflect.Array;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
-import java.util.Map.Entry;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 import commands.CmdArg.ObjConstruct;
-import commands.Script.CommandParseException;
+import commands.CmdArg.VarCmdArg;
+import commands.ScajlVariable.SVJavObj;
 import mod.serpentdagger.artificialartificing.utils.group.MixedPair;
 import utilities.StringUtils;
 
 public class ScriptObject<T>
 {
-	public final HashMap<String, T> objs = new HashMap<String, T>();
-	
 	private final String typeName;
 	private String description;
 	private int unparseID = 0;
 	
-	private ScriptObject<? extends T> lastParsedType = null;
 	private int argRegID = 0;
 	private CmdArg<T> cmdArg;
 	private CmdArg<T>[] inlineConst;
@@ -36,47 +31,22 @@ public class ScriptObject<T>
 	{
 		this.typeName = typeName;
 		this.description = description;
-		final ScriptObject<T> tmp = this;
 		inlineConst = (CmdArg<T>[]) Array.newInstance(CmdArg.class, 0);
 		
-		cmdArg = new CmdArg<T>(typeName, cl)
+		cmdArg = new VarCmdArg<T>(typeName, cl)
 		{
 			@Override
-			public T parse(String trimmed, String[] tokens, Script ctx)
+			public T parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
 			{
-				lastParsedType = tmp;
-				T obj = objs.get(trimmed), old = null;
-				if (obj != null)
-					return obj;
-				for (ScriptObject<? extends T> sub : subs)
-				{
-					obj = sub.cmdArg.parse(trimmed);
-					if (old != null && obj != null)
-						throw new CommandParseException("The key '" + trimmed + "' exists in at least two subtypes of " + typeName);
-					if (obj != null)
-					{
-						old = obj;
-						lastParsedType = sub.lastParsedType;
-					}
-				}
-				return old;
+				if (!(vars[off] instanceof SVJavObj))
+					return null;
+				SVJavObj jObj = (SVJavObj) vars[off];
+				Object[] types = jObj.value;
+				for (Object obj : types)
+					if (cl.isAssignableFrom(obj.getClass()))
+						return (T) obj;
+				return null;
 			}
-			
-			@Override
-			public String unparse(T obj)
-			{
-				if (obj == null)
-					return Script.NULL;
-				if (objs.containsValue(obj))
-				{
-					for (Entry<String, T> ent : objs.entrySet())
-						if (obj.equals(ent.getValue()))
-								return ent.getKey();
-				}
-				String name = newObjKey();
-				objs.put(name, obj);
-				return name;
-			};
 		}.reg();
 	}
 	
@@ -98,25 +68,6 @@ public class ScriptObject<T>
 	public T getObject(String trimmed)
 	{
 		return cmdArg.parse(trimmed);
-	}
-	
-	@SuppressWarnings("unchecked")
-	public ObjectType<T> getObjectType(String trimmed)
-	{
-		T obj = cmdArg.parse(trimmed);
-		return obj == null ? null : new ObjectType<T>(obj, (ScriptObject<T>) lastParsedType, trimmed);
-	}
-	
-	public boolean destroy(String trimmed)
-	{
-		AtomicBoolean out = new AtomicBoolean(false);
-		if (objs.remove(trimmed) != null)
-			out.set(true);
-		Iterator<ScriptObject<? extends T>> it = subs.iterator();
-		while (!out.get() && it.hasNext())
-			if (it.next().objs.remove(trimmed) != null)
-				out.set(true);
-		return out.get();
 	}
 	
 	//////////

@@ -3,9 +3,9 @@ package commands;
 public class BooleanThen
 {
 	public final boolean bool;
-	public final String then;
+	public final ScajlVariable then;
 	
-	public BooleanThen(boolean bool, String then)
+	public BooleanThen(boolean bool, ScajlVariable then)
 	{
 		this.bool = bool;
 		this.then = then;

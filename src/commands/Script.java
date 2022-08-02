@@ -42,8 +42,7 @@ import commands.ParseTracker.DelimTracker;
 import commands.ParseTracker.MultiTracker;
 import commands.ParseTracker.RepeatTracker;
 import commands.ParseTracker.WrapTracker;
-import commands.ScajlVariable.SVArray;
-import commands.ScajlVariable.SVMember;
+import commands.ScajlVariable.*;
 import commands.Scope.SNode;
 import commands.libs.Bool;
 import commands.libs.BuiltInLibs;
@@ -72,7 +71,8 @@ public class Script
 	public static final String PREVIOUS = "PREV";
 	public static final String PARENT = "PARENT";
 	public static final String NULL = "null";
-	public static final String FALSE = "false", TRUE = "true";
+	public static final SVVal NULLV = ScajlVariable.NULL;
+	public static final SVVal FALSE = new SVVal("false", null), TRUE = new SVVal("true", null);
 	
 	public static final String STORE = "->";
 	public static final String INLINE_IF = "?";
@@ -97,7 +97,7 @@ public class Script
 	/** unraw, raw, ref, rcont, unpack_rec, unpack */
 	public static final String[] VALID_VAR_MODS = new String[] { "" + UNRAW, "" + RAW, "" + REF, "" + RAW_CONTENTS, UNPACK_REC, "" + UNPACK };
 	
-	public static final String ILLEGAL_VAR_REG_EX = "[^\\w\\-]";
+	public static final String ILLEGAL_VAR_REG_EX = ".*[^\\w\\-]+.*";
 	public static final Pattern ILLEGAL_VAR_MATCHER = Pattern.compile(ILLEGAL_VAR_REG_EX);
 	
 	public static final String LEGAL_ANON_SCOPE_REG_EX = "[\\{\\}]" + LABEL_MODS_REG.substring(0, LABEL_MODS_REG.length() - 1) + "*";
@@ -145,8 +145,7 @@ public class Script
 		{
 			printCallback.accept(var + "?: ");
 			String in = keyIn.next();
-			in = in.trim();
-			if (!ctx.putVarType(var, in, type, prompt))
+			if (!ctx.putVarType(var, in.trim(), type, prompt))
 				return false;
 		}
 		return true;
@@ -258,9 +257,9 @@ public class Script
 				ctx.parseExcept("Exception occurred during invocation of auto-exposed getter for field '" + displayName + "'", "Exception follows in log.");
 				err.printStackTrace();
 			}
-			
+
 			if (ret == null)
-				return NULL;
+				return NULLV;
 			return typeArg.castAndUnparse(ret);
 		});
 		if (makeSetter)
@@ -366,7 +365,7 @@ public class Script
 			if (isVoid)
 				return ctx.prev();
 			if (out == null)
-				return NULL;
+				return NULLV;
 			return retTypeArg.castAndUnparse(out);
 		});
 		
@@ -634,11 +633,11 @@ public class Script
 			ScajlVariable[] elements = new ScajlVariable[count];
 			for (int i = 0; i < count; i++)
 			{
-				ctx.putVar(INDEX, "" + i);
+				ctx.putVar(INDEX, numOf(i));
 				ctx.runFrom(lab);
 				elements[i] = ctx.getVar(PREVIOUS, false, null);
 			}
-			ctx.putVar(INDEX, "" + count);
+			ctx.putVar(INDEX, numOf(count));
 			ctx.putVar(set.var, new SVArray(set.var, elements, null));
 		}
 		return ctx.prev();
@@ -691,49 +690,34 @@ public class Script
 		if (!OBJECTS.containsKey(type))
 			ctx.parseExcept("Unrecognized type", type);
 		
-		return "" + OBJECTS.get(type).isObject((String) objs[1]);
+		return boolOf(OBJECTS.get(type).isObject((String) objs[1]));
 	});
-	public static final Command DESTROY = add("dest_obj", BOOL, "Returns true and destroys the given Objects only if all the Objects existed.", CmdArg.SCRIPT_OBJECT).setFunc((ctx, objs) ->
+	public static final Command MERGE = add("merge_obj", TOKEN, "Merges the the given Object variables into a single multiclassed Object. If there is more than one value specified for a given Type hirearchy, the last provided will overwrite the previous ones.", CmdArg.SVJAVOBJ).setFunc((ctx, objs) ->
 	{
-		ObjectType<?>[] objType = (ObjectType<?>[]) objs[0];
-		if (objType == null)
-			return FALSE;
+		SVJavObj[] jObjs = (SVJavObj[]) objs[0];
+		if (jObjs.length == 0)
+			return NULLV;
+		if (jObjs.length == 1)
+			return jObjs[0];
 		
-		for (ObjectType<?> obj : objType)
-			obj.destroy();
-		return TRUE;
-	}).setVarArgs().nullable(0);
-	public static final Command DESTROY_ALL = add("dest_all", INT, "Removes all Objects stored under any Type with the given key, and returns the number of Types in which the key was present.", CmdArg.TOKEN).setFunc((ctx, objs) ->
-	{
-		AtomicInteger i = new AtomicInteger(0);
-		OBJECTS.forEach((typeName, type) ->
-		{
-			if (type.objs.remove(objs[0]) != null)
-				i.incrementAndGet();
-		});
-		return "" + i.get();
-	});
-	public static final Command MERGE = add("merge_obj", TOKEN, "Merges the Objects to a single shared key that represents all of them. The old keys will no longer point to those Objects.", CmdArg.SCRIPT_OBJECT).setFunc((ctx, objs) ->
-	{
-		ObjectType<?>[] objTypes = (ObjectType<?>[]) objs[0];
-		if (objTypes.length == 0)
-			return NULL;
-		if (objTypes.length == 1)
-			return objTypes[0].key();
-		
-		String merged = "";
-		for (ObjectType<?> obj : objTypes)
-			if (!merged.contains(obj.key()))
-				merged += obj.key();
-		for (ObjectType<?> obj : objTypes)
-			obj.moveTo(merged);
-		
-		return merged;
+		int count = 0;
+		for (SVJavObj jObj : jObjs)
+			count += jObj.value.length;
+		Object[] merged = new Object[count];
+		for (SVJavObj jObj : jObjs)
+			for (Object obj : jObj.value)
+			{
+				Class<?> objCl = obj.getClass();
+				AUtils.replaceFirst(merged, (i, current) ->
+				{
+					if (current == null)
+						return obj;
+					Class<?> curCl = current.getClass();
+					return curCl.isAssignableFrom(objCl) || objCl.isAssignableFrom(curCl) ? obj : current;
+				});
+			}
+		return new SVJavObj(null, null, null, AUtils.trim(merged));
 	}).setVarArgs();
-	public static final Command OBJ_STRING = add("obj_string", STRING, "Returns the string representation of the object of the given type.", CmdArg.OBJECT).setFunc((ctx, objs) ->
-	{
-		return objs[0].toString();
-	});
 	public static final Command GET_PARENT = add("get_parent", STRING, "Returns the name of the parent script # levels up, where 0 would target this script.", CmdArg.INT).setFunc((ctx, objs) ->
 	{
 		Script p = ctx;
@@ -742,9 +726,9 @@ public class Script
 		{
 			p = p.parent;
 			if (p == null)
-				return NULL;
+				return NULLV;
 		}
-		return p.name == null ? NULL : p.name;
+		return p.name == null ? NULLV : valOf(p.name);
 	});
 	public static final Command IMPORT = add("import", VOID, "Loads the given library by name.", CmdArg.LIBRARY).setFunc((ctx, objs) ->
 	{
@@ -758,7 +742,7 @@ public class Script
 		for (Object obj : objs)
 			if (!(bool = ((Library) obj).isLoaded()))
 				break;
-		return "" + bool;
+		return boolOf(bool);
 	});
 	public static final Command PRINT = add("print", STRING, "Prints and returns the supplied value.", CmdArg.STRING).setFunc((ctx, objs) ->
 	{
@@ -767,7 +751,7 @@ public class Script
 		for (String str : strs)
 			out += str;
 		ctx.printCallback.accept(out);
-		return CmdArg.STRING.unparse(out);
+		return valOf(out);
 	}).setVarArgs();
 	public static final Command PRINT_VARS = add("print_all_vars", VOID, "Prints all variables and their values.").setFunc((ctx, objs) ->
 	{
@@ -806,18 +790,6 @@ public class Script
 		
 		return ctx.prev();
 	});
-	public static final Command PRINT_OBJS = add("print_all_objs", VOID, "Prints all the objects of all the types.").setFunc((ctx, objs) ->
-	{
-		OBJECTS.forEach((type, so) ->
-		{
-			ctx.printCallback.accept(type + ":");
-			so.objs.forEach((k, obj) ->
-			{
-				ctx.printCallback.accept("    " + k + "=" + obj.toString());
-			});
-		});
-		return ctx.prev();
-	});
 	public static final Command KEY_IN = add("key_in", VOID, "Fills the variables with user-keyboard-input.", CmdArg.TOKEN).setFunc((ctx, objs) ->
 	{
 		String[] vars = (String[]) objs[0];
@@ -826,7 +798,7 @@ public class Script
 		{
 			System.out.println(var + "?");
 			next = ctx.keyIn.next();
-			ctx.putVar(var, next);
+			ctx.putVar(var, valOf(next));
 		}
 		return ctx.prev();
 	}).rawArg(0).setVarArgs();
@@ -842,63 +814,69 @@ public class Script
 		String out = "";
 		for (String tokArr : (String[]) objs[0])
 			out += tokArr;
-		return CmdArg.STRING.unparse(out);
+		return strOf(out);
 	}).setVarArgs();
-	public static final Command ARR_MERGE = add("merge_array", TOKEN_ARR, "Merges arrays one onto the other in the order provided.", CmdArg.arrayOf(CmdArg.STRING)).setFunc((ctx, objs) ->
+	public static final Command ARR_MERGE = add("merge_array", TOKEN_ARR, "Merges arrays one onto the other in the order provided.", CmdArg.arrayOf(CmdArg.SVARRAY)).setFunc((ctx, objs) ->
 	{
-		String out = "" + ARR_S;
-		String[][] arrays = (String[][]) objs[0];
+		SVArray[] arrays = (SVArray[]) objs[0];
+		int count = 0;
+		for (SVArray arr : arrays)
+			count += arr.getArray().length;
+		ScajlVariable[] outArr = new ScajlVariable[count];
+		int j = 0;
 		for (int i = 0; i < arrays.length; i++)
-			for (int j = 0; j < arrays[i].length; j++)
-				out += arrays[i][j] + (i == arrays.length - 1 && j == arrays[i].length - 1 ? "" : ARR_SEP + " ");
-		
-		return out + ARR_E;
+		{
+			ScajlVariable[] from = arrays[i].getArray();
+			ArrayUtils.fillFrom(outArr, from, j, 0, from.length);
+			j += from.length;
+		}
+		return arrOf(outArr);
 	}).setVarArgs();
 	public static final Command ADD = add("add", DOUBLE, "Adds and returns the argument numbers.", CmdArg.DOUBLE).setFunc((ctx, objs) ->
 	{
-		return "" + operate(0, (Object[]) objs[0], (all, next) -> all + next);
+		return numOf(operate(0, (Object[]) objs[0], (all, next) -> all + next));
 	}).setVarArgs();
 	public static final Command SUB = add("sub", DOUBLE, "Subtracts and returns the argument numbers.", CmdArg.DOUBLE).setFunc((ctx, objs) ->
 	{
 		Object[] arr = (Object[]) objs[0];
-		return "" + operate((double) arr[0] * 2, arr, (all, next) -> all - next);
+		return numOf(operate((double) arr[0] * 2, arr, (all, next) -> all - next));
 	}).setVarArgs();
 	public static final Command MULT = add("mult", DOUBLE, "Multiplies and returns the argument numbers.", CmdArg.DOUBLE).setFunc((ctx, objs) ->
 	{
-		return "" + operate(1, (Object[]) objs[0], (all, next) -> all * next);
+		return numOf(operate(1, (Object[]) objs[0], (all, next) -> all * next));
 	}).setVarArgs();
 	public static final Command DIVI = add("divi", DOUBLE, "Divides and returns the argument numbers.", CmdArg.DOUBLE).setFunc((ctx, objs) ->
 	{
 		Object[] arr = (Object[]) objs[0];
-		return "" + operate((double) arr[0] * (double) arr[0], arr, (all, next) -> all / next);
+		return numOf(operate((double) arr[0] * (double) arr[0], arr, (all, next) -> all / next));
 	}).setVarArgs();
 	public static final Command MODULO = add("mod", DOUBLE, "Returns A % B.", CmdArg.DOUBLE, CmdArg.DOUBLE).setFunc((ctx, objs) ->
 	{
-		return "" + (Double) objs[0] % (Double) objs[1];
+		return numOf((Double) objs[0] % (Double) objs[1]);
 	});
 	public static final Command INCREMENT = add("inc", DOUBLE, "Returns the increment of the argument number.", CmdArg.DOUBLE).setFunc((ctx, objs) ->
 	{
-		return "" + ((double) objs[0] + 1);
+		return numOf(((double) objs[0] + 1));
 	});
 	public static final Command DECREMENT = add("dec", DOUBLE, "Returns the decriment of the argument number.", CmdArg.DOUBLE).setFunc((ctx, objs) ->
 	{
-		return "" + ((double) objs[0] - 1);
+		return numOf(((double) objs[0] - 1));
 	});
 	public static final Command FLOOR = add("floor", INT, "Returns the largest integer less than or equal to this double.", CmdArg.DOUBLE).setFunc((ctx, objs) ->
 	{
-		return "" + Math.floor((double) objs[0]);
+		return numOf(Math.floor((double) objs[0]));
 	});
 	public static final Command CEIL = add("ceil", INT, "Returns the smallest integer greater than or equal to this double.", CmdArg.DOUBLE).setFunc((ctx, objs) ->
 	{
-		return "" + Math.ceil((double) objs[0]);
+		return numOf(Math.ceil((double) objs[0]));
 	});
 	public static final Command NEGATE = add("negate", DOUBLE, "Returns the negation of the argument number.", CmdArg.DOUBLE).setFunc((ctx, objs) ->
 	{
-		return "" + (-(double) objs[0]);
+		return numOf((-(double) objs[0]));
 	});
 	public static final Command NOT = add("not", BOOL, "Return the boolean inverse of the argument.", CmdArg.BOOLEAN).setFunc((ctx, objs) ->
 	{
-		return "" + (!(boolean) objs[0]);
+		return boolOf((!(boolean) objs[0]));
 	});
 	public static final Command OR = add("or", BOOL, "Return true if any argument is true.", CmdArg.BOOLEAN).setFunc((ctx, objs) ->
 	{
@@ -906,7 +884,7 @@ public class Script
 		boolean out = false;
 		for (boolean b : ors)
 			out = out || b;
-		return "" + out;
+		return boolOf(out);
 	}).setVarArgs();
 	public static final Command AND = add("and", BOOL, "Return true if every argument is true.", CmdArg.BOOLEAN).setFunc((ctx, objs) ->
 	{
@@ -914,11 +892,11 @@ public class Script
 		boolean out = true;
 		for (boolean b : ands)
 			out = out && b;
-		return "" + out;
+		return boolOf(out);
 	}).setVarArgs();
 	public static final Command COMPARE = add("compare", BOOL, "Returns the evaluation of the boolean expression.", CmdArg.BOOLEAN_EXP).setFunc((ctx, objs) ->
 	{
-		return "" + ((BooleanExp) objs[0]).eval();
+		return boolOf(((BooleanExp) objs[0]).eval());
 	});
 	public static final Command STRING_MATCH = add("string_match", BOOL, "Returns true if the Strings match.", CmdArg.STRING).setFunc((ctx, objs) ->
 	{
@@ -926,7 +904,7 @@ public class Script
 		boolean equal = true;
 		for (int i = 1; i < strs.length; i++)
 			equal = equal && strs[i].equals(strs[0]);
-		return "" + equal;
+		return boolOf(equal);
 	}).setVarArgs();
 	public static final Command IF_THEN_ELSE = add("if", TOKEN, "Iterates through the arguments, and returns the first token that has a true boolean, or null.", CmdArg.BOOLEAN_THEN).setFunc((ctx, objs) ->
 	{
@@ -934,7 +912,7 @@ public class Script
 		for (BooleanThen b : ba)
 			if (b.bool)
 				return b.then;
-		return NULL;
+		return NULLV;
 	}).setVarArgs();
 	public static final Command FOR = add("for", VOID, "Excecutes the given token label the given number of times.", CmdArg.INT, CmdArg.TOKEN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
 	{
@@ -945,10 +923,10 @@ public class Script
 			ctx.parseExcept("Invalid label specification", label, "No label found.");
 		for (int i = 0; i < count; i++)
 		{
-			ctx.putVar(INDEX, "" + i);
+			ctx.putVar(INDEX, numOf(i));
 			ctx.runFrom(lab, (VarSet[]) objs[2]);
 		}
-		ctx.putVar(INDEX, "" + count);
+		ctx.putVar(INDEX, numOf(count));
 		return ctx.prev();
 	}).setVarArgs();
 	public static final Command WHILE = add("while", VOID, "While the boolean token (0) is true, excecutes the token label (1). Sets variables as provided before each run (2...).", CmdArg.TOKEN, CmdArg.TOKEN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
@@ -960,11 +938,11 @@ public class Script
 		int ind = 0;
 		while (ctx.valParse(CmdArg.BOOLEAN, ctx.lines[wL], null, (String) objs[0]))
 		{
-			ctx.putVar(INDEX, "" + ind);
+			ctx.putVar(INDEX, numOf(ind));
 			ind++;
 			ctx.runFrom(lab, (VarSet[]) objs[2]);
 		}
-		ctx.putVar(INDEX, "" + ind);
+		ctx.putVar(INDEX, numOf(ind));
 		return ctx.prev();
 	}).rawArg(0).setVarArgs();
 	public static final Command CALL = add("call", VOID, "Excecutes the given token label in a new stack entry. Sets variables to values provided.", CmdArg.TOKEN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
@@ -982,36 +960,26 @@ public class Script
 		return ctx.prev();
 	}).setVarArgs();
 	public static final Command GOTO = overload("goto", CALL, "No difference, but exists for temporary backwards compatibility.", (objs) -> objs, CALL.args).setVarArgs();
-	public static final Command RETURN = add("return", "Value", "Marks the end of a label or code section. If present, will set PREV to argument, or array of arguments if more than one is provided.", CmdArg.TOKEN).setFunc((ctx, objs) ->
+	public static final Command RETURN = add("return", "Value", "Marks the end of a label or code section. If present, will set PREV to argument, or array of arguments if more than one is provided.", CmdArg.SCAJL_VARIABLE).setFunc((ctx, objs) ->
 	{
-		String[] rets = (String[]) objs[0];
+		ScajlVariable[] rets = (ScajlVariable[]) objs[0];
 		SNode last = ctx.popStack();
 		if (rets.length == 0)
-			return last.get(PREVIOUS).raw();
+			return last.get(PREVIOUS);
 		else if (rets.length == 1)
 			return rets[0];
 		else
-		{
-			String out = "" + ARR_S;
-			for (int i = 0; i < rets.length; i++)
-				out += rets[i] + (i == rets.length - 1 ? ARR_E : " " + ARR_SEP);
-			return out;
-		}
+			return arrOf(rets);
 	}).setVarArgs();
-	public static final Command ECHO = add("echo", VOID, "Sets PREV to argument, or array of arguments if more than one is provided.", CmdArg.TOKEN).setFunc((ctx, objs) ->
+	public static final Command ECHO = add("echo", VOID, "Sets PREV to argument, or array of arguments if more than one is provided.", CmdArg.SCAJL_VARIABLE).setFunc((ctx, objs) ->
 	{
-		String[] rets = (String[]) objs[0];
+		ScajlVariable[] rets = (ScajlVariable[]) objs[0];
 		if (rets.length == 0)
 			return ctx.prev();
 		else if (rets.length == 1)
 			return rets[0];
 		else
-		{
-			String out = "" + ARR_S;
-			for (int i = 0; i < rets.length; i++)
-				out += rets[i] + (i == rets.length - 1 ? ARR_E : " " + ARR_SEP);
-			return out;
-		}
+			return arrOf(rets);
 	}).setVarArgs();
 	public static final Command RUN_SCRIPT = add("run_script", Script.VOID, "Runs the given script. Booleans determine whether variables in this script will be given to other before being run, and whether variables in other will be pulled to this script once finished.", CmdArg.STRING, CmdArg.BOOLEAN, CmdArg.BOOLEAN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
 	{
@@ -1021,7 +989,7 @@ public class Script
 			ctx.parseExcept("Specified script does not exist", name);
 		
 		Script script;
-		String out = ctx.prev();
+		ScajlVariable out = ctx.prev();
 		try
 		{
 			script = new Script(scr);
@@ -1029,7 +997,7 @@ public class Script
 			if ((boolean) objs[1])
 				script.integrateVarsFrom(ctx);
 			
-			script.putVar(Script.PARENT, ctx.name);
+			script.putVar(Script.PARENT, valOf(ctx.name));
 			script.name = name;
 			script.run((VarSet[]) objs[3]);
 			
@@ -1056,7 +1024,7 @@ public class Script
 			ctx.parseExcept("Specified script does not exist", name);
 		
 		Script script;
-		String out = ctx.prev();
+		ScajlVariable out = ctx.prev();
 		try
 		{
 			script = new Script(scr);
@@ -1068,7 +1036,7 @@ public class Script
 			Label lab = script.getLabel(label);
 			if (lab != null)
 			{
-				script.putVar(Script.PARENT, ctx.name);
+				script.putVar(Script.PARENT, valOf(ctx.name));
 				script.name = name;
 				script.runFrom(lab, (VarSet[]) objs[4]);
 				if ((boolean) objs[3])
@@ -1110,7 +1078,7 @@ public class Script
 	public static final Command GET_MOUSE_POS = add("get_mouse_pos", arrayReturnDispl(INT), "Gets and returns the position of the mouse pointer.").setFunc((ctx, objs) ->
 	{
 		Point p = MouseInfo.getPointerInfo().getLocation();
-		return toArrayString(new String[] { "" + p.x, "" + p.y });
+		return arrOf(p.x, p.y);
 	});
 	
 	public static final Command MOUSE_MOVE = add("mouse_move", VOID, "Move mouse to the X, Y supplied.", CmdArg.INT, CmdArg.INT).setFunc((ctx, objs) ->
@@ -1164,12 +1132,12 @@ public class Script
 	{
 		int a = ctx.rob.getAutoDelay();
 		ctx.rob.setAutoDelay((int) objs[0]);
-		return "" + a;
+		return numOf(a);
 	});
 	
 	public static final Command GET_AUTO_DELAY = add("get_robot_delay", INT, "Gets the automatic delay after robot operations.").setFunc((ctx, objs) ->
 	{
-		return "" + ctx.rob.getAutoDelay();
+		return numOf(ctx.rob.getAutoDelay());
 	});
 	
 	static
@@ -1203,12 +1171,12 @@ public class Script
 				String key = (String) objs[0];
 				Field field = keyCode(key);
 				k.key(field.getInt(field), ctx, objs);
-				return "" + true;
+				return TRUE;
 			}
 			catch (NoSuchFieldException | IllegalArgumentException | IllegalAccessException e)
 			{
 				ctx.exceptionCallback.accept(e);
-				return "" + false;
+				return FALSE;
 			}
 		});
 	}
@@ -1434,6 +1402,44 @@ public class Script
 		}
 		return out.toArray(new String[out.size()]);
 	}
+	public static SVVal boolOf(boolean bool)
+	{
+		return bool ? TRUE : FALSE;
+	}
+	public static SVVal numOf(double num)
+	{
+		return new SVVal(num, null);
+	}
+	public static SVVal valOf(String val)
+	{
+		return new SVVal(val, null);
+	}
+	public static SVString strOf(String str)
+	{
+		return new SVString(str, str, null);
+	}
+	public static ScajlVariable objOf(Object obj)
+	{
+		return obj == null ? NULLV : new SVJavObj(obj);
+	}
+	public static SVArray arrOf(ScajlVariable... arr)
+	{
+		return new SVArray(null, null, null, arr, null);
+	}
+	public static SVArray arrOf(String... arr)
+	{
+		ScajlVariable[] svarr = new ScajlVariable[arr.length];
+		for (int i = 0; i < arr.length; i++)
+			svarr[i] = valOf(arr[i]);
+		return arrOf(svarr);
+	}
+	public static SVArray arrOf(double... arr)
+	{
+		ScajlVariable[] svarr = new ScajlVariable[arr.length];
+		for (int i = 0; i < arr.length; i++)
+			svarr[i] = numOf(arr[i]);
+		return arrOf(svarr);
+	}
 	public static String[] argsOf(String line)
 	{
 		String[] spl = syntaxedSplit(line.trim(), "\\s", 1, 2);
@@ -1581,14 +1587,14 @@ public class Script
 		return toUnp;
 	}
 	
-	public static String tokenize(String... objs)
+	public static ScajlVariable tokenize(String... objs)
 	{
-		return StringUtils.toString(objs, "", " ", "");
+		return valOf(StringUtils.toString(objs, "" + TOK_S, " ", "" + TOK_E));
 	}
 	
-	public static String tokenize(double... nums)
+	public static ScajlVariable tokenize(double... nums)
 	{
-		return StringUtils.toString(nums, "", " ", "");
+		return valOf(StringUtils.toString(nums, "" + TOK_S, " ", "" + TOK_E));
 	}
 	
 	public static String arrayReturnDispl(String of)
@@ -1601,11 +1607,6 @@ public class Script
 	public ScajlVariable getVar(String input, boolean rawDefault, SVMember selfCtx)
 	{
 		return ScajlVariable.getVar(input, rawDefault, this, selfCtx);
-	}
-	
-	public void putVar(String input, String val)
-	{
-		putVar(input, ScajlVariable.getVar(val, false, this));
 	}
 	
 	public void putVar(String input, ScajlVariable var)
@@ -1966,18 +1967,19 @@ public class Script
 			if (head.isInlineWhile)
 				whil = valParse(CmdArg.BOOLEAN, line, selfCtx, head.inlineWhile);
 			if (head.isInlineFor || head.isInlineWhile)
-				putVar(INDEX, "0");
+				putVar(INDEX, numOf(0));
 			for (int f = 0; f < fur || (head.isInlineWhile && whil);)
 			{
 				RunnableCommand cmd = parse(line, head, breakIf, selfCtx);
 				if (cmd != null)
 				{
-					String out;
+					ScajlVariable out;
 					putVar(PREVIOUS, out = cmd.run(this));
 					for (int i = 0; i < head.storing.length; i++)
 						putVar(head.storing[i], out);
-					prevCallback.accept(head.name, out);
-					debugger.info(head.name, cmd.getInput(), out);
+					String raw = out.raw();
+					prevCallback.accept(head.name, raw);
+					debugger.info(head.name, cmd.getInput(), raw);
 				}
 				if (popped != null) // Popped isn't empty -> something returned. Old stack doesn't return to anything -> end script.
 				{
@@ -1986,12 +1988,12 @@ public class Script
 				}
 				f++;
 				if (head.isInlineFor || head.isInlineWhile)
-					putVar(INDEX, "" + f);				
+					putVar(INDEX, numOf(f));				
 				if (head.isInlineWhile)
 					whil = valParse(CmdArg.BOOLEAN, line, selfCtx, head.inlineWhile);
 			}
 			if (head.isInlineFor)
-				putVar(INDEX, "" + fur);
+				putVar(INDEX, numOf(fur));
 		}
 		return new CommandResult(prev(), false);
 	}
@@ -2013,7 +2015,7 @@ public class Script
 		}
 		else
 		{
-			putVar(name, val);
+			putVar(name, valOf(val));
 			return true;
 		}
 	}
@@ -2039,9 +2041,9 @@ public class Script
 		scope.integrateFrom(other.scope);
 	}
 	
-	public String prev()
+	public ScajlVariable prev()
 	{
-		return getVar(PREVIOUS, false, null).raw();
+		return getVar(PREVIOUS, false, null);
 	}
 	public static String arrayTrim(String token)
 	{

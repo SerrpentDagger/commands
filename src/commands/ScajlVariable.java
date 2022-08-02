@@ -31,6 +31,7 @@ public abstract class ScajlVariable
 	}
 	
 	public abstract String val(Script ctx);
+	public abstract ScajlVariable eval(Script ctx);
 	public abstract String raw();
 	public VarCtx varCtx(String[] memberAccess, int off, boolean put, Script ctx)
 	{
@@ -106,6 +107,12 @@ public abstract class ScajlVariable
 		}
 
 		@Override
+		public ScajlVariable eval(Script ctx)
+		{
+			return this;
+		}
+
+		@Override
 		public String raw()
 		{
 			return modless;
@@ -128,8 +135,14 @@ public abstract class ScajlVariable
 		@Override
 		public String val(Script ctx)
 		{
+			return eval(ctx).val(ctx);
+		}
+		
+		@Override
+		public ScajlVariable eval(Script ctx)
+		{
 			ScajlVariable var = ctx.scope.get(modless);
-			return var == null ? NULL.input : var.val(ctx);
+			return var == null ? NULL : var;
 		}
 		
 		@Override
@@ -162,6 +175,12 @@ public abstract class ScajlVariable
 		}
 		
 		@Override
+		public ScajlVariable eval(Script ctx)
+		{
+			return this;
+		}
+		
+		@Override
 		public String raw()
 		{
 			return Script.STRING_CHAR + unraw + Script.STRING_CHAR;
@@ -171,6 +190,60 @@ public abstract class ScajlVariable
 		public SVString clone()
 		{
 			return new SVString(input, modless, selfCtx.get());
+		}
+	}
+	
+	public static class SVJavObj extends ScajlVariable
+	{
+		public final Object[] value;
+		private SVVal typeCount;
+
+		public SVJavObj(String input, String modless, SVMember selfCtx, Object[] val)
+		{
+			super(input, modless, selfCtx);
+			value = val;
+			typeCount = new SVVal(val.length, null);
+		}
+		
+		public SVJavObj(Object val)
+		{
+			this(null, null, null, new Object[] { val });
+		}
+		
+		@Override
+		public String val(Script ctx)
+		{
+			return raw();
+		}
+		
+		@Override
+		public ScajlVariable eval(Script ctx)
+		{
+			return this;
+		}
+		
+		@Override
+		public String raw()
+		{
+			return StringUtils.toString(value, (o) -> o == null ? Script.NULL : o.toString(), "", " | ", "");
+		}
+
+		@Override
+		public VarCtx varCtx(String[] memberAccess, int off, boolean put, Script ctx)
+		{
+			if (off == memberAccess.length - 1 && getVar(memberAccess[off], false, ctx).val(ctx).equals(Script.ARR_LEN))
+			{
+				if (put)
+					ctx.parseExcept("Invalid member access", "Cannot set the '%s' value of an Object directly.".formatted(Script.ARR_LEN));
+				return new VarCtx(() -> typeCount);
+			}
+			return super.varCtx(memberAccess, off, put, ctx);
+		}
+		
+		@Override
+		public SVJavObj clone()
+		{
+			return new SVJavObj(input, modless, selfCtx.get(), value);
 		}
 	}
 	
@@ -188,6 +261,12 @@ public abstract class ScajlVariable
 		public String val(Script ctx)
 		{
 			return name == null ? raw() : raw();
+		}
+		
+		@Override
+		public ScajlVariable eval(Script ctx)
+		{
+			return this;
 		}
 		
 		@Override
@@ -417,6 +496,11 @@ public abstract class ScajlVariable
 			}
 			return clone;
 		}
+		
+		public ScajlVariable[] getArray()
+		{
+			return array;
+		}
 	}
 	
 	public static class SVExec extends ScajlVariable
@@ -428,6 +512,12 @@ public abstract class ScajlVariable
 
 		@Override
 		public String val(Script ctx)
+		{
+			return eval(ctx).val(ctx);
+		}
+		
+		@Override
+		public ScajlVariable eval(Script ctx)
 		{
 			return ctx.runExecutable(modless, selfCtx.get()).output;
 		}
@@ -576,10 +666,10 @@ public abstract class ScajlVariable
 			ctx.parseExcept("Malformed Executable", "An Executable must start and end with the '" + Script.SCOPE_S + "' and '" + Script.SCOPE_E + "' characters, respectively.", "From input: " + input);
 		
 		if (isExec && (isRaw || isRawCont || isUnraw))
-			ctx.parseExcept("Invalid executable modifier", "An Executable can only be modified with the 'reference' reference modifier '" + Script.REF + "'", "From input: " + input);
+			ctx.parseExcept("Invalid executable modifier", "An Executable can only be modified with the 'lookup' reference modifier '" + Script.REF + "'", "From input: " + input);
 		
 		if (isExec && !isRef)
-			return getVar(ctx.runExecutable(modless, selfCtx).output, false, ctx, selfCtx);
+			return ctx.runExecutable(modless, selfCtx).output;
 		
 		if (isString)
 			return new SVString(input, modless, selfCtx);
