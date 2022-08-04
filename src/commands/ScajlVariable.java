@@ -12,6 +12,7 @@ import java.util.regex.Pattern;
 import arrays.AUtils;
 import arrays.AUtils.Ind;
 import mod.serpentdagger.artificialartificing.utils.group.MixedPair;
+import utilities.ArrayUtils;
 import utilities.StringUtils;
 
 public abstract class ScajlVariable
@@ -249,18 +250,15 @@ public abstract class ScajlVariable
 	
 	protected static abstract class SVMember extends ScajlVariable
 	{
-		public final String name;
-		
-		public SVMember(String input, String modless, String name, SVMember selfCtx)
+		public SVMember(String input, String modless, SVMember selfCtx)
 		{
 			super(input, modless, selfCtx);
-			this.name = name;
 		}
 		
 		@Override
 		public String val(Script ctx)
 		{
-			return name == null ? raw() : raw();
+			return raw();
 		}
 		
 		@Override
@@ -294,9 +292,9 @@ public abstract class ScajlVariable
 	{
 		private LinkedHashMap<String, ScajlVariable> map;
 		
-		public SVMap(String input, String modless, String name, Script ctx, SVMember selfCtx)
+		public SVMap(String input, String modless, Script ctx, SVMember selfCtx)
 		{
-			super(input, modless, name, selfCtx);
+			super(input, modless, selfCtx);
 			String[] elements = Script.arrayElementsOf(modless);
 			map = new LinkedHashMap<>(elements.length);
 			for (int i = 0; i < elements.length; i++)
@@ -306,9 +304,9 @@ public abstract class ScajlVariable
 				map.put(key, getVar(keyVal[1], false, ctx, this));
 			}
 		}
-		public SVMap(String input, String modless, String name, LinkedHashMap<String, ScajlVariable> map, SVMember selfCtx)
+		public SVMap(String input, String modless, LinkedHashMap<String, ScajlVariable> map, SVMember selfCtx)
 		{
-			super(input, modless, name, selfCtx);
+			super(input, modless, selfCtx);
 			this.map = map;
 		}
 
@@ -353,7 +351,7 @@ public abstract class ScajlVariable
 		public ScajlVariable clone()
 		{
 			LinkedHashMap<String, ScajlVariable> deepCopy = new LinkedHashMap<>();
-			SVMap clone = new SVMap(input, modless, null, deepCopy, selfCtx.get());
+			SVMap clone = new SVMap(input, modless, deepCopy, selfCtx.get());
 			Iterator<Entry<String, ScajlVariable>> it = map.entrySet().iterator();
 			while (it.hasNext())
 			{
@@ -372,7 +370,7 @@ public abstract class ScajlVariable
 
 		public SVTokGroup(String input, String modless, Script ctx, SVMember selfCtx)
 		{
-			super(input, modless, null, selfCtx);
+			super(input, modless, selfCtx);
 			String[] elements = Script.tokensOf(Script.unpack(modless));
 			array = new ScajlVariable[elements.length];
 			for (int i = 0; i < elements.length; i++)
@@ -380,7 +378,7 @@ public abstract class ScajlVariable
 		}
 		public SVTokGroup(String input, String modless, ScajlVariable[] array, SVMember selfCtx)
 		{
-			super(input, modless, null, selfCtx);
+			super(input, modless, selfCtx);
 			this.array = array;
 		}
 		
@@ -415,32 +413,40 @@ public abstract class ScajlVariable
 				ctx.parseExcept("Invalid member access on Token Group", "The indexed variable is not a type which can be indexed.", "From access: " + StringUtils.toString(memberAccess, "", "" + Script.ARR_ACCESS, ""));
 			return new VarCtx(() -> this);
 		}
+		
+		public ScajlVariable[] getArray()
+		{
+			return array;
+		}
 	}
 	
 	public static class SVArray extends SVMember
 	{
 		private ScajlVariable[] array;
 		private SVVal length;
+		public final boolean noUnpack;
 		
-		public SVArray(String input, String modless, String name, Script ctx, SVMember selfCtx)
+		public SVArray(String input, String modless, boolean noUnpack, Script ctx, SVMember selfCtx)
 		{
-			super(input, modless, name, selfCtx);
+			super(input, modless, selfCtx);
 			String[] elements = Script.arrayElementsOf(modless);
 			array = new ScajlVariable[elements.length];
 			Arrays.fill(array, NULL);
 			for (int i = 0; i < elements.length; i++)
 				array[i] = getVar(elements[i], false, ctx, this);
 			length = new SVVal(array.length, this);
+			this.noUnpack = noUnpack;
 		}
-		public SVArray(String input, String modless, String name, ScajlVariable[] array, SVMember selfCtx)
+		public SVArray(String input, String modless, ScajlVariable[] array, boolean noUnpack, SVMember selfCtx)
 		{
-			super(input, modless, name, selfCtx);
+			super(input, modless, selfCtx);
 			this.array = array;
 			length = new SVVal(array.length, this);
+			this.noUnpack = noUnpack;
 		}
-		public SVArray(String name, ScajlVariable[] array, SVMember selfCtx)
+		public SVArray(ScajlVariable[] array, SVMember selfCtx)
 		{
-			this(name, name, name, array, selfCtx);
+			this(null, null, array, false, selfCtx);
 		}
 
 		@Override
@@ -488,7 +494,7 @@ public abstract class ScajlVariable
 		public SVArray clone()
 		{
 			ScajlVariable[] deepCopy = Arrays.copyOf(array, array.length);
-			SVArray clone = new SVArray(input, modless, null, deepCopy, selfCtx.get());
+			SVArray clone = new SVArray(input, modless, deepCopy, noUnpack, selfCtx.get());
 			for (int i = 0; i < deepCopy.length; i++)
 			{
 				deepCopy[i] = deepCopy[i].clone();
@@ -588,26 +594,34 @@ public abstract class ScajlVariable
 		return var != null;
 	}
 	
-	public static String[] preParse(String token, Script ctx)
+	public static Object[] preParse(String token, Script ctx)
 	{
 		return preParse(new String[] { token }, ctx);
 	}
 	
-	public static String[] preParse(String[] tokens, Script ctx)
+	public static Object[] preParse(String[] tokens, Script ctx)
 	{
 		Ind ind = new Ind(0);
-		for (int i = 0; i < tokens.length; i = ind.get())
+		Object[] out = new Object[tokens.length];
+		ArrayUtils.fillFrom(out, tokens);
+		for (int i = 0; i < out.length; i = ind.get())
 		{
-			if (tokens[i].charAt(0) == Script.UNPACK)
+			String str;
+			if (out[i] instanceof String && (str = (String) out[i]).charAt(0) == Script.UNPACK)
 			{
-				String unp = getVar(tokens[i].substring(1), false, ctx).val(ctx);
-				unp = Script.unpack(unp);
-				tokens = AUtils.replace(tokens, Script.tokensOf(unp), i, ind);
+				ScajlVariable unp = getVar(str.substring(1), false, ctx).eval(ctx);
+				if (unp instanceof SVTokGroup)
+					out = AUtils.replace(out, ((SVTokGroup) unp).array, i, ind);
+				else
+				{
+					out[i] = unp;
+					ind.inc();
+				}
 			}
 			else
 				ind.inc();
 		}
-		return tokens;
+		return out;
 	}
 	
 	public static ScajlVariable getVar(String input, boolean rawDef, Script ctx)
@@ -629,9 +643,10 @@ public abstract class ScajlVariable
 		boolean isRaw = mods[1] || (rawDef && !isUnraw);
 		boolean isRef = mods[2];
 		boolean isRawCont = mods[3];
-		boolean isUnpack = mods[4] || mods[5];
+		boolean isUnpack = mods[4];
+		boolean noUnpack = mods[5];
 		if (isUnpack)
-			ctx.parseExcept("Illegal reference modifier.", "The 'unpack' reference modifier is disallowed for this location", "From input: " + input);
+			ctx.parseExcept("Illegal reference modifier", "The 'unpack' reference modifier is disallowed for this location", "From input: " + input);
 		int modCount = countTrues(mods);
 		if (modCount > 1)
 			ctx.parseExcept("Invalid variable usage", "A maximum of 1 reference modifier is allowed per token", "From input: " + input);
@@ -644,24 +659,29 @@ public abstract class ScajlVariable
 				return var.varCtx(arrAcc, 1, false, ctx).get.get();
 			}
 		}
+		else
+			return new SVVal(input, modless, selfCtx);
 		
 		boolean isString = modless.startsWith("" + Script.STRING_CHAR);
 		if (isString && !modless.endsWith("" + Script.STRING_CHAR))
 			ctx.parseExcept("Malformed String", "A quoted String must start and end with the '\"' character.", "From input: " + input);
-		boolean isContainer = !isString && modless.startsWith("" + Script.ARR_S);
+		boolean isContainer = modless.startsWith("" + Script.ARR_S);
 		boolean hasEq = isContainer && Script.syntaxedContains(modless.substring(1), Pattern.quote("" + Script.MAP_KEY_EQ), 1);
 		if (isContainer && !modless.endsWith("" + Script.ARR_E))
 			ctx.parseExcept("Malformed Container", "An Array or Map must start and end with the '" + Script.ARR_S + "' and '" + Script.ARR_E + "' characters, respectively.", "From input: " + input);
 		boolean isArray = isContainer && !hasEq;
+		if (noUnpack && !isArray)
+			ctx.parseExcept("Illegal reference modifier", "The \"don't unpack\" modifier is only allowed on Array declarations", "From input: " + input);
 		boolean isMap = isContainer && hasEq;
-		if ((isArray || isMap || isString) && modCount > 0)
-			ctx.parseExcept("Invalid value usage", "A quoted String or an Array or Map must start and end with their respective boxing characters.", "From input: " + input);
+		if ((isArray || isMap || isString) && (isUnraw || isRef || isRawCont || isUnpack))
+			ctx.parseExcept("Illegal reference modifiers", "The only reference modifier allowed on an Array, Map or String declaration is the \"don't unpack\" modifier placed in front of an Array", "From input: " + input);
+			//ctx.parseExcept("Invalid value usage", "A quoted String or an Array or Map must start and end with their respective boxing characters.", "From input: " + input);
 			
-		boolean isGroup = !isContainer && modless.startsWith("" + Script.TOK_S);
+		boolean isGroup = modless.startsWith("" + Script.TOK_S);
 		if (isGroup && !modless.endsWith("" + Script.TOK_E))
 			ctx.parseExcept("Malformed Token Group", "A Token Group must start and end with the '" + Script.TOK_S + "' and '" + Script.TOK_E + "' characters, respectively.", "From input: " + input);
 		
-		boolean isExec = !isGroup && modless.startsWith("" + Script.SCOPE_S);
+		boolean isExec = modless.startsWith("" + Script.SCOPE_S);
 		if (isExec && !modless.endsWith("" + Script.SCOPE_E))
 			ctx.parseExcept("Malformed Executable", "An Executable must start and end with the '" + Script.SCOPE_S + "' and '" + Script.SCOPE_E + "' characters, respectively.", "From input: " + input);
 		
@@ -674,13 +694,11 @@ public abstract class ScajlVariable
 		if (isString)
 			return new SVString(input, modless, selfCtx);
 		if (isArray)
-			return new SVArray(input, modless, null, ctx, selfCtx);
+			return new SVArray(input, modless, noUnpack, ctx, selfCtx);
 		if (isGroup)
 			return new SVTokGroup(input, modless, ctx, selfCtx);
 		if (isMap)
-			return new SVMap(input, modless, null, ctx, selfCtx);
-		if (isRaw)
-			return new SVVal(input, modless, selfCtx);
+			return new SVMap(input, modless, ctx, selfCtx);
 		if (isRef)
 		{
 			if (isExec)

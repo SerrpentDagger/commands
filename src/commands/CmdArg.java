@@ -10,7 +10,9 @@ import commands.BooleanExp.Comp;
 import commands.DoubleExp.Oper;
 import commands.ScajlVariable.SVArray;
 import commands.ScajlVariable.SVJavObj;
+import commands.ScajlVariable.SVTokGroup;
 import utilities.ArrayUtils;
+import utilities.StringUtils;
 
 public abstract class CmdArg<T>
 {
@@ -72,6 +74,17 @@ public abstract class CmdArg<T>
 		}
 		Iterator<CmdArg<?>> it = bin.values().iterator();
 		return (CmdArg<T>) it.next();
+	}
+	
+	@SuppressWarnings("unchecked")
+	public static <T> CmdArg<T> getArgForCount(CmdArg<T> defalt, int writtenTokenCount)
+	{
+		if (defalt.tokenCount() == writtenTokenCount)
+			return defalt;
+		LinkedHashMap<Integer, CmdArg<?>> bin = ARGS.get(defalt.cls);
+		if (bin == null || bin.isEmpty())
+			return null;
+		return (CmdArg<T>) bin.get(writtenTokenCount);
 	}
 	
 	public static <T> TypeArg<T> getTypeArgFor(Class<T> cls)
@@ -629,7 +642,7 @@ public abstract class CmdArg<T>
 		{
 			String v;
 			ScajlVariable s;
-			v = TOKEN.parse(tokens, off, ctx);
+			v = vars[off].val(ctx);
 			s = vars[off + 1];
 			if (v == null || s == null)
 				return null;
@@ -883,7 +896,12 @@ public abstract class CmdArg<T>
 				ScajlVariable[] elements = array.getArray();
 				X arr = (X) Array.newInstance(prim, elements.length);
 				for (int i = 0; i < elements.length; i++)
-					Array.set(arr, i, wrappedArg.parse(elements[i].val(ctx).trim(), null, ctx));
+				{
+					Object val = parseArrayElement(wrappedArg, elements[i].eval(ctx), array.noUnpack, ctx);
+					if (val == null)
+						return null;
+					Array.set(arr, i, val);
+				}
 				return arr;
 			}
 			
@@ -911,8 +929,6 @@ public abstract class CmdArg<T>
 		{
 			array = new VarCmdArg<X[]>(Script.ARR_S + arg.type + Script.ARR_E, arrClass)
 			{
-				//TODO: Array should be able to parse using differen CmdArgs.
-				//TODO: Array should be able to store and parse elements of more than one token.
 				@Override
 				public X[] parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
 				{
@@ -920,16 +936,13 @@ public abstract class CmdArg<T>
 						return null;
 					SVArray array = (SVArray) vars[off];
 					ScajlVariable[] elements = array.getArray();
-					int count = arg.tokenCount();
 					int xLen = elements.length;
 					
 					X[] arr = (X[]) Array.newInstance(arg.cls, xLen);
-					ScajlVariable[] elmVars = new ScajlVariable[1];
 					for (int i = 0; i < elements.length; i++)
 					{
-						ScajlVariable elm = elements[i];
-						elmVars[0] = elm;
-						X val = arg instanceof VarCmdArg ? arg.parse(null, elmVars, 0, ctx) : arg.parse(elm.val(ctx));
+						ScajlVariable elm = elements[i].eval(ctx);
+						X val = parseArrayElement(arg, elm, array.noUnpack, ctx);
 						if (val == null)
 							return null;
 						arr[i] = val;
@@ -949,5 +962,30 @@ public abstract class CmdArg<T>
 		}
 		
 		return array;
+	}
+	private static <X> X parseArrayElement(CmdArg<X> arg, ScajlVariable elm, boolean noUnpack, Script ctx)
+	{
+		ScajlVariable[] eVars;
+		if (!noUnpack && elm instanceof SVTokGroup && !arg.cls.isAssignableFrom(SVTokGroup.class))
+			eVars = ((SVTokGroup) elm).getArray();
+		else
+			eVars = new ScajlVariable[] { elm };
+		CmdArg<X> elmArg = getArgForCount(arg, eVars.length);
+		if (elmArg == null)
+		{
+			ctx.parseExcept("Invalid array token resolution", "The format '" + arg.type + "' requires " + arg.tokenCount() + " tokens, but " + eVars.length + " have been provided. Tokens are separated by spaces, and automatically unpacked when parsing an Array unless that Array was declared with the " + Script.NO_UNPACK + " modifier.");
+			return null;
+		}
+		String[] toks = null;
+		if (!(elmArg instanceof VarCmdArg))
+		{
+			toks = new String[eVars.length];
+			for (int v = 0; v < eVars.length; v++)
+				toks[v] = eVars[v].val(ctx);
+		}
+		X val = elmArg.parse(toks, eVars, 0, ctx);
+		if (val == null)
+			ctx.parseExcept("Invalid Array element resolution", "Expected type '" + elmArg.type + "'", "Input tokens: " + StringUtils.toString(eVars, (v) -> v.toString(), "'", " ", "'"));
+		return val;
 	}
 }

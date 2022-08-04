@@ -92,10 +92,9 @@ public class Script
 	public static final String INDEX = "INDEX";
 	public static final int NO_LABEL = -2;
 	public static final Label GLOBAL = new Label("GLOBAL", -1, false, true, false);
-	public static final char UNRAW = '%', RAW = '$', REF = '@', RAW_CONTENTS = '&', UNPACK = '^';
-	public static final String UNPACK_REC = "" + UNPACK + UNPACK;
-	/** unraw, raw, ref, rcont, unpack_rec, unpack */
-	public static final String[] VALID_VAR_MODS = new String[] { "" + UNRAW, "" + RAW, "" + REF, "" + RAW_CONTENTS, UNPACK_REC, "" + UNPACK };
+	public static final char UNRAW = '%', RAW = '$', REF = '@', RAW_CONTENTS = '&', UNPACK = '^', NO_UNPACK = '|';
+	/** unraw, raw, ref, rcont, unpack, no_unpack */
+	public static final String[] VALID_VAR_MODS = new String[] { "" + UNRAW, "" + RAW, "" + REF, "" + RAW_CONTENTS, "" + UNPACK, "" + NO_UNPACK };
 	
 	public static final String ILLEGAL_VAR_REG_EX = ".*[^\\w\\-]+.*";
 	public static final Pattern ILLEGAL_VAR_MATCHER = Pattern.compile(ILLEGAL_VAR_REG_EX);
@@ -613,9 +612,9 @@ public class Script
 		for (IntVarSet set : sets)
 		{
 			ScajlVariable[] arr = new ScajlVariable[set.i];
-			Arrays.setAll(arr, (i) -> set.set.clone());
+			Arrays.setAll(arr, (i) -> set.set);
 			
-			ctx.putVar(set.var, new SVArray(set.var, arr, null));
+			ctx.putVar(set.var, new SVArray(arr, null));
 		}
 		
 		return ctx.prev();
@@ -638,7 +637,7 @@ public class Script
 				elements[i] = ctx.getVar(PREVIOUS, false, null);
 			}
 			ctx.putVar(INDEX, numOf(count));
-			ctx.putVar(set.var, new SVArray(set.var, elements, null));
+			ctx.putVar(set.var, new SVArray(elements, null));
 		}
 		return ctx.prev();
 	}).setVarArgs();
@@ -649,7 +648,7 @@ public class Script
 			ctx.scope.makeGlobal(var);
 		
 		return ctx.prev();
-	}).setVarArgs();
+	}).rawArg(0).setVarArgs();
 	public static final Command IS_VAR = add("is_var", BOOL, "Checks whether or not the token is a variable.", CmdArg.TOKEN).setFunc((ctx, objs) ->
 	{
 		String[] vars = (String[]) objs[0];
@@ -963,6 +962,8 @@ public class Script
 	public static final Command RETURN = add("return", "Value", "Marks the end of a label or code section. If present, will set PREV to argument, or array of arguments if more than one is provided.", CmdArg.SCAJL_VARIABLE).setFunc((ctx, objs) ->
 	{
 		ScajlVariable[] rets = (ScajlVariable[]) objs[0];
+		for (int i = 0; i < rets.length; i++)
+			rets[i] = rets[i].eval(ctx);
 		SNode last = ctx.popStack();
 		if (rets.length == 0)
 			return last.get(PREVIOUS);
@@ -974,6 +975,8 @@ public class Script
 	public static final Command ECHO = add("echo", VOID, "Sets PREV to argument, or array of arguments if more than one is provided.", CmdArg.SCAJL_VARIABLE).setFunc((ctx, objs) ->
 	{
 		ScajlVariable[] rets = (ScajlVariable[]) objs[0];
+		for (int i = 0; i < rets.length; i++)
+			rets[i] = rets[i].eval(ctx);
 		if (rets.length == 0)
 			return ctx.prev();
 		else if (rets.length == 1)
@@ -1424,7 +1427,7 @@ public class Script
 	}
 	public static SVArray arrOf(ScajlVariable... arr)
 	{
-		return new SVArray(null, null, null, arr, null);
+		return new SVArray(null, null, arr, false, null);
 	}
 	public static SVArray arrOf(String... arr)
 	{
@@ -1622,7 +1625,7 @@ public class Script
 	{
 		int count = arg.tokenCount();
 
-		MixedPair<String[], ScajlVariable[]> tokVarPair = tokVarPair(tokenRawDefault, arg instanceof VarCmdArg, selfCtx, tokens);
+		MixedPair<String[], ScajlVariable[]> tokVarPair = tokVarPair(tokenRawDefault, arg instanceof VarCmdArg, selfCtx, (Object[]) tokens);
 		tokens = tokVarPair.a();
 		ScajlVariable[] vars = tokVarPair.b();
 		
@@ -1636,14 +1639,25 @@ public class Script
 		
 		return obj;
 	}
-	public MixedPair<String[], ScajlVariable[]> tokVarPair(IntPredicate tokenRawDefault, boolean unresolved, SVMember selfCtx, String... tokens)
+	public MixedPair<String[], ScajlVariable[]> tokVarPair(IntPredicate tokenRawDefault, boolean unresolved, SVMember selfCtx, Object... preParse)
 	{
-		ScajlVariable[] vars = new ScajlVariable[tokens.length];
+		ScajlVariable[] vars = new ScajlVariable[preParse.length];
+		String[] tokens = new String[preParse.length];
 		for (int i = 0; i < vars.length; i++)
 		{
-			ScajlVariable var = getVar(tokens[i], tokenRawDefault.test(i), selfCtx);
-			vars[i] = var;
-			tokens[i] = !unresolved ? vars[i].val(this) : vars[i].raw();
+			if (preParse[i] instanceof String)
+			{
+				ScajlVariable var = getVar((String) preParse[i], tokenRawDefault.test(i), selfCtx);
+				vars[i] = var;
+				tokens[i] = !unresolved ? vars[i].val(this) : vars[i].raw();
+			}
+			else if (preParse[i] instanceof ScajlVariable)
+			{
+				vars[i] = (ScajlVariable) preParse[i];
+				tokens[i] = vars[i].raw();
+			}
+			else
+				throw new IllegalArgumentException("Non-String, non-ScajlVariable parameter passed as preParsed values.");
 		}
 		return new MixedPair<>(tokens, vars);
 	}
@@ -1697,6 +1711,8 @@ public class Script
 					CmdArg<?>[] args = cmd.args;
 					boolean varArgs = cmd.isVarArgs();
 					boolean varArgArray = argStrs.length > 0 && argStrs[argStrs.length - 1].startsWith(VAR_ARG_STR);
+					if (varArgArray)
+						argStrs[argStrs.length - 1] = argStrs[argStrs.length - 1].substring(1);
 					if (varArgArray && !varArgs)
 						parseExcept("Var-Arg array cannot be specified for non-var-arg commands", line, argStrs[argStrs.length]);
 					if (argStrs.length != args.length && !(varArgs && argStrs.length >= args.length - 1 && !varArgArray))
@@ -1718,24 +1734,22 @@ public class Script
 						
 						CmdArg<?> arg = args[varArgInd];
 						final CmdArg<?> origArg = arg;
-						LinkedHashMap<Integer, CmdArg<?>> bin = CmdArg.ARGS.get(arg.cls);
 						
 						String[] tokenSource = tokensOf(argStrs[argInd]);
 						String tokenSourceStr = StringUtils.toString(tokenSource, "", " ", "");
-						tokenSource = ScajlVariable.preParse(tokenSource, this);
+						Object[] preParse = ScajlVariable.preParse(tokenSource, this);
 						
 						Object obj = null;
 						
 						String trimmed = "";
 						if (!varArgArray)
 						{
-							if (arg.tokenCount() != tokenSource.length)
-								arg = bin.get(tokenSource.length);
-							if (arg == null || arg.tokenCount() != tokenSource.length)
-								parseExcept("Invalid token count for CmdArg format '" + origArg.type + "'", line, "Format requires " + origArg.tokenCount() + " tokens, but " + tokenSource.length + " have been provided. Tokens are separated by spaces. From tokens: " + tokenSourceStr);
+							arg = CmdArg.getArgForCount(arg, preParse.length);
+							if (arg == null)
+								parseExcept("Invalid token count for CmdArg format '" + origArg.type + "'", line, "Format requires " + origArg.tokenCount() + " tokens, but " + preParse.length + " have been provided. Tokens are separated by spaces. From tokens: " + tokenSourceStr);
 							
 							final CmdArg<?> aarg = arg;
-							MixedPair<String[], ScajlVariable[]> tokVarPair = tokVarPair((i) -> cmd.rawArg[varArgInd] || aarg.rawToken(i), aarg instanceof VarCmdArg, selfCtx, tokenSource);
+							MixedPair<String[], ScajlVariable[]> tokVarPair = tokVarPair((i) -> cmd.rawArg[varArgInd] || aarg.rawToken(i), aarg instanceof VarCmdArg, selfCtx, preParse);
 							String[] tokens = tokVarPair.a();
 							trimmed = StringUtils.toString(tokens, "", " ", "");
 							ScajlVariable[] vars = tokVarPair.b();
@@ -1752,8 +1766,8 @@ public class Script
 						}
 						else
 						{
-							final CmdArg<?> arrArg = cmd.variadic, aarg = arg;
-							MixedPair<String[], ScajlVariable[]> tokVarPair = tokVarPair((i) -> false, aarg instanceof VarCmdArg, selfCtx, tokenSource);
+							final CmdArg<?> arrArg = cmd.variadic;
+							MixedPair<String[], ScajlVariable[]> tokVarPair = tokVarPair((i) -> false, true, selfCtx, preParse);
 							String[] tokens = tokVarPair.a();
 							ScajlVariable[] vars = tokVarPair.b();
 							trimmed = tokens[0];
