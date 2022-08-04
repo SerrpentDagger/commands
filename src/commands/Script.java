@@ -42,7 +42,11 @@ import commands.ParseTracker.DelimTracker;
 import commands.ParseTracker.MultiTracker;
 import commands.ParseTracker.RepeatTracker;
 import commands.ParseTracker.WrapTracker;
-import commands.ScajlVariable.*;
+import commands.ScajlVariable.SVArray;
+import commands.ScajlVariable.SVJavObj;
+import commands.ScajlVariable.SVMember;
+import commands.ScajlVariable.SVString;
+import commands.ScajlVariable.SVVal;
 import commands.Scope.SNode;
 import commands.libs.Bool;
 import commands.libs.BuiltInLibs;
@@ -775,6 +779,12 @@ public class Script
 		CMDS.values().forEach((cmd) -> ctx.printCallback.accept("   " + cmd.getInfoString()));
 		ctx.printCallback.accept("--- Types ---");
 		OBJECTS.values().forEach((obj) -> ctx.printCallback.accept("   " + obj.getInfoString()));
+		ctx.printCallback.accept("--- Inline Formats ---");
+/*		CmdArg.ARGS.forEach((cls, bin) ->
+		{
+			ctx.printCallback.accept("   " + cls.getSimpleName() + ":");
+			bin.forEach((tc, arg) -> ctx.printCallback.accept("      " + tc + ": " + arg.getInfoString()));
+		});*/
 		ctx.printCallback.accept("--- Object Hirearchy ---");
 		ctx.printCallback.accept(OBJECTS.get("Object").hirearchyString());
 		ctx.printCallback.accept("--- Libraries ---");

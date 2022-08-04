@@ -18,6 +18,7 @@ public abstract class CmdArg<T>
 {
 	static final HashMap<Class<?>, LinkedHashMap<Integer, CmdArg<?>>> ARGS = new HashMap<>();
 	private static final HashMap<Class<?>, Class<?>> WRAP_PRIMITIVE = new HashMap<>();
+	static
 	{
 		WRAP_PRIMITIVE.put(boolean.class, Boolean.class);
 		WRAP_PRIMITIVE.put(byte.class, Byte.class);
@@ -555,6 +556,33 @@ public abstract class CmdArg<T>
 			return Script.strOf(obj);
 		};
 	}.reg();
+	static
+	{
+		for (int i = 2; i < 6; i++)
+		{
+			final int ii = i;
+			new CmdArg<String>(StringUtils.mult("String ", i).trim(), String.class)
+			{
+				@Override
+				public int tokenCount()
+				{
+					return ii;
+				}
+			
+				@Override
+				public String parse(String trimmed, String[] tokens, Script ctx)
+				{
+					return trimmed;
+				}
+				
+				@Override
+				public ScajlVariable unparse(String obj)
+				{
+					return STRING.unparse(obj);
+				};
+			}.reg();
+		}
+	}
 	
 	public static final CmdArg<Boolean> BOOLEAN = new CmdArg<Boolean>("Boolean", Boolean.class)
 	{

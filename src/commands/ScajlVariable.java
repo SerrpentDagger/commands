@@ -82,6 +82,11 @@ public abstract class ScajlVariable
 	
 	@Override
 	public abstract ScajlVariable clone();
+	
+	public ScajlVariable clone(boolean noUnpack)
+	{
+		return clone();
+	}
 	//////////////////////
 	
 	public static class SVVal extends ScajlVariable
@@ -491,7 +496,13 @@ public abstract class ScajlVariable
 		}
 		
 		@Override
-		public SVArray clone()
+		public ScajlVariable clone()
+		{
+			return clone(noUnpack);
+		}
+		
+		@Override
+		public SVArray clone(boolean noUnpack)
 		{
 			ScajlVariable[] deepCopy = Arrays.copyOf(array, array.length);
 			SVArray clone = new SVArray(input, modless, deepCopy, noUnpack, selfCtx.get());
@@ -648,8 +659,8 @@ public abstract class ScajlVariable
 		if (isUnpack)
 			ctx.parseExcept("Illegal reference modifier", "The 'unpack' reference modifier is disallowed for this location", "From input: " + input);
 		int modCount = countTrues(mods);
-		if (modCount > 1)
-			ctx.parseExcept("Invalid variable usage", "A maximum of 1 reference modifier is allowed per token", "From input: " + input);
+		if (modCount > 1 && !(noUnpack && isRawCont))
+			ctx.parseExcept("Invalid variable usage", "A maximum of 1 reference modifier is allowed per token, except for the '" + Script.NO_UNPACK + Script.RAW_CONTENTS + "' combination applied to an Array variable.", "From input: " + input);
 		if (!isRaw)
 		{
 			String[] arrAcc = Script.syntaxedSplit(input, "" + Script.ARR_ACCESS);
@@ -670,11 +681,11 @@ public abstract class ScajlVariable
 		if (isContainer && !modless.endsWith("" + Script.ARR_E))
 			ctx.parseExcept("Malformed Container", "An Array or Map must start and end with the '" + Script.ARR_S + "' and '" + Script.ARR_E + "' characters, respectively.", "From input: " + input);
 		boolean isArray = isContainer && !hasEq;
-		if (noUnpack && !isArray)
-			ctx.parseExcept("Illegal reference modifier", "The \"don't unpack\" modifier is only allowed on Array declarations", "From input: " + input);
+		if (noUnpack && !(isArray || isRawCont))
+			ctx.parseExcept("Illegal reference modifier", "The \"don't unpack\" modifier is only allowed on Array declarations and clonings.", "From input: " + input);
 		boolean isMap = isContainer && hasEq;
 		if ((isArray || isMap || isString) && (isUnraw || isRef || isRawCont || isUnpack))
-			ctx.parseExcept("Illegal reference modifiers", "The only reference modifier allowed on an Array, Map or String declaration is the \"don't unpack\" modifier placed in front of an Array", "From input: " + input);
+			ctx.parseExcept("Illegal reference modifiers", "The only reference modifier allowed on an Array, Map or String declaration is the \"don't unpack\" modifier placed in front of an Array declaration or cloning", "From input: " + input);
 			//ctx.parseExcept("Invalid value usage", "A quoted String or an Array or Map must start and end with their respective boxing characters.", "From input: " + input);
 			
 		boolean isGroup = modless.startsWith("" + Script.TOK_S);
@@ -715,7 +726,7 @@ public abstract class ScajlVariable
 		if (var == null)
 			return new SVVal(input, modless, selfCtx);
 		if (isRawCont)
-			return var.clone();
+			return noUnpack ? var.clone(noUnpack) : var.clone();
 		return var;
 	}
 	
