@@ -2,7 +2,11 @@ package commands;
 
 import java.awt.Color;
 import java.lang.reflect.Array;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
+import java.lang.reflect.Parameter;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 
@@ -12,12 +16,14 @@ import commands.ScajlVariable.SVArray;
 import commands.ScajlVariable.SVJavObj;
 import commands.ScajlVariable.SVTokGroup;
 import utilities.ArrayUtils;
+import utilities.MapUtils;
 import utilities.StringUtils;
 
 public abstract class CmdArg<T>
 {
 	static final HashMap<Class<?>, LinkedHashMap<Integer, CmdArg<?>>> ARGS = new HashMap<>();
 	private static final HashMap<Class<?>, Class<?>> WRAP_PRIMITIVE = new HashMap<>();
+	private static final HashSet<Method> OBJECT_METHODS = new HashSet<>();
 	static
 	{
 		WRAP_PRIMITIVE.put(boolean.class, Boolean.class);
@@ -29,6 +35,9 @@ public abstract class CmdArg<T>
 		WRAP_PRIMITIVE.put(long.class, Long.class);
 		WRAP_PRIMITIVE.put(short.class, Short.class);
 		WRAP_PRIMITIVE.put(void.class, Void.class);
+		
+		for (Method m : Object.class.getMethods())
+			OBJECT_METHODS.add(m);
 	}
 	public static Class<?> wrap(Class<?> cl) { return WRAP_PRIMITIVE.get(cl); }
 	
@@ -99,7 +108,7 @@ public abstract class CmdArg<T>
 		public final CmdArg<TY> arg;
 		public TypeArg(Class<TY> type, CmdArg<TY> arg) { this.cl = type; this.arg = arg; }
 		@SuppressWarnings("unchecked")
-		public ScajlVariable castAndUnparse(Object obj) { return arg.unparse((TY) obj); }
+		public ScajlVariable castAndUnparse(Object obj, Script ctx) { return obj == null ? ScajlVariable.NULL : arg.unparse((TY) obj, ctx); }
 	}
 
 	/////////////////////////////////////////
@@ -157,6 +166,11 @@ public abstract class CmdArg<T>
 		if (tokenCount() > 1)
 			throw new IllegalStateException("Attempt to parse multitoken arg without providing token array.");
 		return parse(trimmed, null, null);
+	}
+	
+	public ScajlVariable unparse(T obj, Script ctx)
+	{
+		return unparse(obj);
 	}
 	
 	public ScajlVariable unparse(T obj)
@@ -296,12 +310,12 @@ public abstract class CmdArg<T>
 		}
 		
 		@Override
-		public ScajlVariable unparse(Object obj)
+		public ScajlVariable unparse(Object obj, Script ctx)
 		{
 			TypeArg<?> typeArg = getTypeArgFor(obj.getClass());
 			if (typeArg.arg == null || typeArg.arg == this)
-				return ScajlVariable.NULL;
-			return typeArg.castAndUnparse(obj);
+				return Script.objOf(obj);
+			return typeArg.castAndUnparse(obj, ctx);
 		}
 	}.reg();
 	
@@ -404,6 +418,21 @@ public abstract class CmdArg<T>
 			Integer i = INT.parse(trimmed, tokens, ctx);
 			return i == null ? null : (short) (int) i;
 		}
+	}.reg();
+	
+	public static final CmdArg<Void> VOID = new CmdArg<Void>("Void", Void.class)
+	{
+		@Override
+		public Void parse(String trimmed, String[] tokens, Script ctx)
+		{
+			return null;
+		}
+		
+		@Override
+		public ScajlVariable unparse(Void obj, Script ctx)
+		{
+			return ctx.prev();
+		};
 	}.reg();
 	
 	public static final CmdArg<Double> DOUBLE_POSITIVE = new CmdArg<Double>("PositiveDouble", Double.class)
@@ -651,6 +680,15 @@ public abstract class CmdArg<T>
 		}
 	}.reg();
 	
+	public static final CmdArg<Label> LABEL = new CmdArg<Label>("Label", Label.class)
+	{
+		@Override
+		public Label parse(String trimmed, String[] tokens, Script ctx)
+		{
+			return ctx.getLabel(trimmed);
+		}
+	};
+	
 	public static final VarCmdArg<VarSet> VAR_SET = new VarCmdArg<VarSet>("VarName Value", VarSet.class)
 	{
 		@Override
@@ -804,6 +842,146 @@ public abstract class CmdArg<T>
 	
 	////////////////////////////////////////
 	
+	public static <X> CmdArg<X> funcInterfaceOf(ScriptObject<X> scajlType, FITransformer<X> transformer)
+	{
+		return funcInterfaceOf(scajlType.getTypeName(), scajlType.argOf().cls, transformer);
+	}
+	public static <X> CmdArg<X> funcInterfaceOf(Class<X> funcInt, FITransformer<X> transformer)
+	{
+		return funcInterfaceOf(funcInt.getSimpleName(), funcInt, transformer);
+	}
+	/**
+	 * @param <X>
+	 * @param typeName
+	 * @param funcInt The Class of the functional interface to be exposed.
+	 * @param transformer An {@linkplain FITransformer} to produce a valid X function.
+	 * @return New, registerd CmdArg.
+	 * 
+	 * Example usage:
+<pre> 
+...
+
+&#64;FunctionalInterface
+public static interface Pos3dVal
+{
+   public double val(Pos3d pos);
+}
+
+...
+
+CmdArg.funcInterfaceOf(Pos3dVal.class, (matching) -> (pos) -> (double) matching.run(pos));
+</pre> 
+	 */
+	public static <X> CmdArg<X> funcInterfaceOf(String typeName, Class<X> funcInt, FITransformer<X> transformer)
+	{
+		Method[] methods = funcInt.getMethods();
+		int absCount = 0;
+		Method abs = null;
+		for (Method method : methods)
+			if (Modifier.isAbstract(method.getModifiers()) && MapUtils.getFirst(OBJECT_METHODS.iterator(), (objM) ->
+			{
+				Parameter[] m = null, o = null;
+				boolean match = method.getName().equals(objM.getName())
+						&& method.getReturnType().equals(objM.getReturnType())
+						&& (m = method.getParameters()).length == (o = objM.getParameters()).length;
+				if (match)
+					for (int i = 0; match && i < m.length; i++)
+						match = m[i].getType().equals(o[i].getType());
+				return match;
+			}) == null)
+			{
+				abs = method;
+				absCount++;
+			}
+		if (!funcInt.isInterface() || absCount != 1)
+			throw new IllegalArgumentException("Class specified for funcInterfaceOf is not a functional interface: " + funcInt.getCanonicalName());
+		final Method fiM = abs;
+		Parameter[] fiParams = fiM.getParameters();
+		Class<?> retType = fiM.getReturnType();
+		if (retType.isPrimitive())
+			retType = wrap(retType);
+		CmdArg<?> retArg = getArgFor(retType);
+		boolean isVoid = retType.equals(Void.class);
+		if (retArg == null && !isVoid)
+			throw new IllegalStateException("Unable to produce functional interface CmdArg due to missing CmdArg for return type: " + retType.getCanonicalName());
+		int pCount = fiParams.length;
+		Class<?>[] paramTypes = new Class<?>[pCount];
+		TypeArg<?>[] paramArgs = new TypeArg<?>[pCount];
+		String[] paramNames = new String[pCount];
+		for (int i = 0; i < pCount; i++)
+		{
+			paramTypes[i] = fiParams[i].getType();
+			paramArgs[i] = getTypeArgFor(paramTypes[i]);
+			if (paramArgs[i] == null || paramArgs[i].arg == null)
+				throw new IllegalStateException("Unable to produce functional interface CmdArg due to missing CmdArg for parameter type: " + paramTypes[i].getCanonicalName());
+			paramNames[i] = fiParams[i].getName().toUpperCase();
+		}
+		
+		typeName += "(";
+		for (int i = 0; i < pCount; i++)
+			typeName += "'" + paramArgs[i].arg.type + "':" + paramNames[i] + (i == pCount - 1 ? " " : ", ");
+		typeName += "-> " + retArg.type + ")";
+		
+		CmdArg<X> arg = new CmdArg<X>(typeName, funcInt)
+		{
+			@Override
+			public X parse(String trimmed, String[] tokens, Script ctx)
+			{
+				Label lab = LABEL.parse(trimmed, tokens, ctx);
+				if (lab == null)
+					return null;
+				return transformer.transform((objs) ->
+				{
+					if (objs.length != pCount)
+						throw new IllegalArgumentException("Args provided in FITransformer do not match the requested functional interface method signature.");
+					VarSet[] sets = new VarSet[pCount];
+					for (int i = 0; i < objs.length; i++)
+						sets[i] = new VarSet(paramNames[i], paramArgs[i].castAndUnparse(objs[i], ctx));
+					
+					ctx.runFrom(lab, sets);
+					
+					if (isVoid)
+						return null;
+					ScajlVariable[] vars = new ScajlVariable[] { ctx.prev() };
+					Object out;
+					if (retArg instanceof VarCmdArg)
+						out = retArg.parse(null, vars, 0, ctx);
+					else
+						out = retArg.parse(new String[] { vars[0].val(ctx) }, vars, 0, ctx);
+					if (out == null)
+						ctx.parseExcept("Invalid return value: " + vars[0].raw(), "The functional interface expects a return of type: " + retArg.type);
+					return out;
+				});
+			}
+			
+			@Override
+			public ScajlVariable unparse(X obj)
+			{
+				return Script.objOf(obj);
+			};
+		}.reg();
+		
+		return arg;
+	}
+	@FunctionalInterface
+	public static interface FIMatcher
+	{
+		public Object run(Object... objs);
+	}
+	/**
+	 * @param fromMatchingSignature
+	 * @return An X of format: <p><code>(Xarg1, Xarg2, Xarg3...) -> (Xreturn) fromMatchingSignature.run(Xarg1, Xarg2, Xarg3...)</code>
+	 */
+	@FunctionalInterface
+	public static interface FITransformer<X>
+	{
+		/**
+		 * @param fromMatchingSignature
+		 * @return An X of format: <p><code>(Xarg1, Xarg2, Xarg3...) -> (Xreturn) fromMatchingSignature.run(Xarg1, Xarg2, Xarg3...)</code>
+		 */
+		public X transform(FIMatcher fromMatchingSignature);
+	}
+	
 	@SuppressWarnings("unchecked")
 	public static <X> PrefCmdArg<X> prefixedOf(CmdArg<X> arg, String prefix)
 	{
@@ -818,9 +996,9 @@ public abstract class CmdArg<T>
 			pref = new PrefCmdArg<X>(prefix + " " + arg.type, arg.cls)
 			{
 				@Override
-				public ScajlVariable unparse(X obj)
+				public ScajlVariable unparse(X obj, Script ctx)
 				{
-					return arg.unparse(obj);
+					return arg.unparse(obj, ctx);
 				}
 			};
 			pref.add(prefix, arg).reg();
@@ -882,9 +1060,9 @@ public abstract class CmdArg<T>
 			}
 			
 			@Override
-			public ScajlVariable unparse(T obj)
+			public ScajlVariable unparse(T obj, Script ctx)
 			{
-				return original.unparse(obj);
+				return original.unparse(obj, ctx);
 			}
 		};
 		
@@ -979,11 +1157,11 @@ public abstract class CmdArg<T>
 				}
 				
 				@Override
-				public ScajlVariable unparse(X[] obj)
+				public ScajlVariable unparse(X[] obj, Script ctx)
 				{
 					ScajlVariable[] elements = new ScajlVariable[obj.length];
 					for (int i = 0; i < obj.length; i++)
-						elements[i] = arg.unparse(obj[i]);
+						elements[i] = arg.unparse(obj[i], ctx);
 					return Script.arrOf(elements);
 				}
 			}.reg();

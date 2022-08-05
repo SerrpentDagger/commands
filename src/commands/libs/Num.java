@@ -6,24 +6,6 @@ public class Num extends Number
 	 * 
 	 */
 	private static final long serialVersionUID = 1L;
-	/*	public static final CmdArg<Operation> OPERATION = new CmdArg<Operation>("OperationLabel", Operation.class)
-	{
-		@Override
-		public Operation parse(String trimmed)
-		{
-			return (a, b) ->
-			{
-				
-			};
-		}
-		
-		@Override
-		public String unparse(Operation obj)
-		{
-			return Script.NULL;
-		};
-	};
-	*/
 	private double val;
 	public Num(double val)
 	{

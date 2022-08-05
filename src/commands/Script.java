@@ -263,7 +263,7 @@ public class Script
 
 			if (ret == null)
 				return NULLV;
-			return typeArg.castAndUnparse(ret);
+			return typeArg.castAndUnparse(ret, ctx);
 		});
 		if (makeSetter)
 		{
@@ -329,7 +329,7 @@ public class Script
 		if (retType.isPrimitive())
 			retType = CmdArg.wrap(retType);
 		TypeArg<?> retTypeArg = getTypeArgFor(retType, filter, clFilter, recursive);
-		boolean isVoid = retType.equals(Void.TYPE);
+		boolean isVoid = retType.equals(Void.class);
 		
 		if (retTypeArg.arg == null)
 			throw new IllegalStateException("Unable to automatically expose method '" + displayName + "' due to lack of registered"
@@ -369,7 +369,7 @@ public class Script
 				return ctx.prev();
 			if (out == null)
 				return NULLV;
-			return retTypeArg.castAndUnparse(out);
+			return retTypeArg.castAndUnparse(out, ctx);
 		});
 		
 		return cmd;
@@ -407,6 +407,19 @@ public class Script
 				&& cl.getSuperclass() != null
 				&& cl != Class.class;
 	};
+	public static Command[] exposeMethodsByName(Class<?> from, ScriptObject<?> to, boolean recursive, String... names)
+	{
+		return exposeMethodsByName(from, to, SAFE_EXPOSE_FILTER, SAFE_CLASS_EXPOSE_FILTER, recursive, names);
+	}
+	public static Command[] exposeMethodsByName(Class<?> from, ScriptObject<?> to, ExpPredicate iff, ClsPredicate clIff, boolean recursive, String... names)
+	{
+		Method[] ms = from.getMethods();
+		ArrayList<Command> out = new ArrayList<>();
+		for (Method m : ms)
+			if (ArrayUtils.contains(names, m.getName()) && iff.test(m, recursive))
+				out.add(expose(m, to, iff, clIff, recursive));
+		return out.toArray(new Command[out.size()]);
+	}
 	public static Command[] exposeAll(Member[] members, ScriptObject<?> to, ExpPredicate iff)
 	{
 		return exposeAll(members, to, iff, SAFE_CLASS_EXPOSE_FILTER, false);
@@ -923,49 +936,33 @@ public class Script
 				return b.then;
 		return NULLV;
 	}).setVarArgs();
-	public static final Command FOR = add("for", VOID, "Excecutes the given token label the given number of times.", CmdArg.INT, CmdArg.TOKEN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
+	public static final Command FOR = add("for", VOID, "Excecutes the given token label the given number of times.", CmdArg.INT, CmdArg.LABEL, CmdArg.VAR_SET).setFunc((ctx, objs) ->
 	{
 		int count = (int) objs[0];
-		String label = (String) objs[1];
-		Label lab = ctx.getLabel(label);
-		if (lab == null)
-			ctx.parseExcept("Invalid label specification", label, "No label found.");
 		for (int i = 0; i < count; i++)
 		{
 			ctx.putVar(INDEX, numOf(i));
-			ctx.runFrom(lab, (VarSet[]) objs[2]);
+			ctx.runFrom((Label) objs[1], (VarSet[]) objs[2]);
 		}
 		ctx.putVar(INDEX, numOf(count));
 		return ctx.prev();
 	}).setVarArgs();
-	public static final Command WHILE = add("while", VOID, "While the boolean token (0) is true, excecutes the token label (1). Sets variables as provided before each run (2...).", CmdArg.TOKEN, CmdArg.TOKEN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
+	public static final Command WHILE = add("while", VOID, "While the boolean token (0) is true, excecutes the label (1). Sets variables as provided before each run (2...).", CmdArg.TOKEN, CmdArg.LABEL, CmdArg.VAR_SET).setFunc((ctx, objs) ->
 	{
 		int wL = ctx.parseLine;
-		Label lab = ctx.getLabel((String) objs[1]);
-		if (lab == null)
-			ctx.parseExcept("Invalid label specification", (String) objs[1], "No label found.");
 		int ind = 0;
 		while (ctx.valParse(CmdArg.BOOLEAN, ctx.lines[wL], null, (String) objs[0]))
 		{
 			ctx.putVar(INDEX, numOf(ind));
 			ind++;
-			ctx.runFrom(lab, (VarSet[]) objs[2]);
+			ctx.runFrom((Label) objs[1], (VarSet[]) objs[2]);
 		}
 		ctx.putVar(INDEX, numOf(ind));
 		return ctx.prev();
 	}).rawArg(0).setVarArgs();
-	public static final Command CALL = add("call", VOID, "Excecutes the given token label in a new stack entry. Sets variables to values provided.", CmdArg.TOKEN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
+	public static final Command CALL = add("call", VOID, "Excecutes the given token label in a new stack entry. Sets variables to values provided.", CmdArg.LABEL, CmdArg.VAR_SET).setFunc((ctx, objs) ->
 	{
-		String label = (String) objs[0];
-		if (label.equals(NULL))
-			return ctx.prev();
-		
-		Label lab = ctx.getLabel(label);
-		if (lab == null)
-			ctx.parseExcept("Invalid label specification", label, "No label found.");
-		
-		ctx.runFrom(lab, (VarSet[]) objs[1]);
-		
+		ctx.runFrom((Label) objs[0], (VarSet[]) objs[1]);
 		return ctx.prev();
 	}).setVarArgs();
 	public static final Command GOTO = overload("goto", CALL, "No difference, but exists for temporary backwards compatibility.", (objs) -> objs, CALL.args).setVarArgs();
@@ -1739,8 +1736,8 @@ public class Script
 						boolean firstVarArg = varArgs && argInd == args.length - 1;
 						int varArgInd = Math.min(argInd, args.length - 1);
 						
-						if (varArgArray && !firstVarArg)
-							parseExcept("Invalid argument count", line, "If var-arg arguments are specified as an array, the array must be the last argument");
+						if (!firstVarArg && argStrs[argInd].startsWith(VAR_ARG_STR))
+							parseExcept("Invalid argument", line, "Only the last argument in var-args commands may use the var-arg array modifier '" + VAR_ARG_STR + "'");
 						
 						CmdArg<?> arg = args[varArgInd];
 						final CmdArg<?> origArg = arg;
@@ -1752,7 +1749,7 @@ public class Script
 						Object obj = null;
 						
 						String trimmed = "";
-						if (!varArgArray)
+						if (!atVA || !varArgArray)
 						{
 							arg = CmdArg.getArgForCount(arg, preParse.length);
 							if (arg == null)
@@ -1917,7 +1914,7 @@ public class Script
 		}
 	}
 	private int labelsDeep = 0;
-	private void runFrom(Label label, VarSet... varSets)
+	protected void runFrom(Label label, VarSet... varSets)
 	{
 		pushStack(label);
 		for (VarSet var : varSets)
@@ -1929,25 +1926,28 @@ public class Script
 		while(parseLine < lines.length && !stack.isEmpty() && !forceKill.get())
 		{
 			String line = lines[parseLine];
-			if (line.startsWith(LABEL) || line.startsWith(SCOPED_LABEL))
-				labelsDeep++;
-			else if (labelsDeep == 0)
+			if (!line.isEmpty())
 			{
-				if (line.equals(HELP_CHAR_STR))
-					PRINT_COMMANDS.func.cmd(this, (Object[]) null);
-				else if (startsWith(line, SCOPE_S) && LEGAL_ANON_SCOPE_MATCHER.matcher(line).matches())
-					scope.push(anonScope.get(parseLine));
-				else if (endsWith(line, SCOPE_E) && LEGAL_ANON_SCOPE_MATCHER.matcher(line).matches())
-					scope.pop();
-				else
+				if (line.startsWith(LABEL) || line.startsWith(SCOPED_LABEL))
+					labelsDeep++;
+				else if (labelsDeep == 0)
 				{
-					CommandResult res = runExecutable(line, breakIf, null);
-					if (res.shouldBreak)
-						break;
+					if (line.equals(HELP_CHAR_STR))
+						PRINT_COMMANDS.func.cmd(this, (Object[]) null);
+					else if (startsWith(line, SCOPE_S) && LEGAL_ANON_SCOPE_MATCHER.matcher(line).matches())
+						scope.push(anonScope.get(parseLine));
+					else if (endsWith(line, SCOPE_E) && LEGAL_ANON_SCOPE_MATCHER.matcher(line).matches())
+						scope.pop();
+					else
+					{
+						CommandResult res = runExecutable(line, breakIf, null);
+						if (res.shouldBreak)
+							break;
+					}
 				}
+				else if (new CmdHead(firstToken(line)).name.equals(RETURN.name))
+					labelsDeep--;
 			}
-			else if (new CmdHead(firstToken(line)).name.equals(RETURN.name))
-				labelsDeep--;
 			parseLine++;
 		}
 	}
@@ -1992,8 +1992,14 @@ public class Script
 				whil = valParse(CmdArg.BOOLEAN, line, selfCtx, head.inlineWhile);
 			if (head.isInlineFor || head.isInlineWhile)
 				putVar(INDEX, numOf(0));
-			for (int f = 0; f < fur || (head.isInlineWhile && whil);)
+			for (int f = 0; !forceKill.get() && (f < fur || (head.isInlineWhile && whil));)
 			{
+				Point p = MouseInfo.getPointerInfo().getLocation();
+				if (p.x == 0 && p.y == 0)
+				{
+					forceKill.set(true);
+					parseExcept("Operation was interrupted by the user", "Mouse was moved to 0 0");
+				}
 				RunnableCommand cmd = parse(line, head, breakIf, selfCtx);
 				if (cmd != null)
 				{

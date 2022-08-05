@@ -134,52 +134,6 @@ public class ScriptObject<T>
 		CmdArg<T> inline = CmdArg.inlineOf(construct, cmdArg, args);
 		
 		return add(inline);
-		
-/*		CmdArg<T> inline = new CmdArg<T>(format, cmdArg.cls)
-		{
-			@Override
-			public int tokenCount()
-			{
-				return tc;
-			}
-		
-			@Override
-			public boolean rawToken(int ind)
-			{
-				for (int i = 0; i < args.length; i++)
-				{
-					if (ind < args[i].tokenCount())
-						return args[i].rawToken(ind);
-					ind -= args[i].tokenCount();
-				}
-				return false;
-			}
-			
-			@Override
-			public T parse(String trimmed, String[] tokens, Script ctx)
-			{
-				Object[] objs = new Object[args.length];
-				int t = 0;
-				for (int a = 0; a < args.length; a++)
-				{
-					String trmd = "";
-					for (int i = 0; i < args[a].tokenCount(); i++)
-						trmd += tokens[t + i] + (i == args[a].tokenCount() - 1 ? "" : " ");
-					t += args[a].tokenCount();
-					objs[a] = args[a].parse(trmd);
-					if (objs[a] == null)
-						return null;
-				}
-				
-				return construct.construct(objs);
-			}
-			
-			@Override
-			public String unparse(T obj)
-			{
-				return cmdArg.unparse(obj);
-			}
-		};*/
 	}
 	
 	public void setDescription(String str)
