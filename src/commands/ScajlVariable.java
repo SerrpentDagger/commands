@@ -36,9 +36,12 @@ public abstract class ScajlVariable
 	public abstract String raw();
 	public VarCtx varCtx(String[] memberAccess, int off, boolean put, Script ctx)
 	{
-		String val = getVar(memberAccess[off], false, ctx, selfCtx.get()).val(ctx);
-		if (val.equals(Script.ARR_SELF))
-			return selfCtx(memberAccess, off, put, ctx);
+		if (off < memberAccess.length)
+		{
+			String val = getVar(memberAccess[off], false, ctx, selfCtx.get()).val(ctx);
+			if (val.equals(Script.ARR_SELF))
+				return selfCtx(memberAccess, off, put, ctx);
+		}
 		if (put || memberAccess != null && off != memberAccess.length)
 			ctx.parseExcept("Invalid member access", "The indexed variable is not a type which can be indexed.", "From access: " + StringUtils.toString(memberAccess, "", "" + Script.ARR_ACCESS, ""));
 		return new VarCtx(() -> this);
@@ -237,11 +240,37 @@ public abstract class ScajlVariable
 		@Override
 		public VarCtx varCtx(String[] memberAccess, int off, boolean put, Script ctx)
 		{
-			if (off == memberAccess.length - 1 && getVar(memberAccess[off], false, ctx).val(ctx).equals(Script.ARR_LEN))
+			boolean last = off == memberAccess.length - 1;
+			if (last && getVar(memberAccess[off], false, ctx).val(ctx).equals(Script.ARR_LEN))
 			{
 				if (put)
 					ctx.parseExcept("Invalid member access", "Cannot set the '%s' value of an Object directly.".formatted(Script.ARR_LEN));
 				return new VarCtx(() -> typeCount);
+			}
+			else if (off < memberAccess.length)
+			{
+				String[] split = Script.objCallOf(memberAccess[off]);
+				if (split.length == 2)
+				{
+					if (!split[1].endsWith("" + Script.TOK_E))
+						ctx.parseExcept("Unfinished delimiter", "The indexed Object is missing a closing parenthesis.");
+					String name = getVar(split[0], true, ctx).val(ctx);
+					String namePref = null;
+					for (Object val : value)
+					{
+						Class<?> cl = val.getClass();
+						ScriptObject<?> type = Script.getType(cl);
+						if (type == null)
+							throw new IllegalStateException("A non-Scajl-exposed Object type has been stored in a Scajl variable: " + cl.getCanonicalName());
+						if (type.getMemberCmd(name) != null)
+						{
+							namePref = type.getTypeName();
+							ctx.putVar("OBJ", this);
+							ctx.runExecutable(namePref + Script.ARR_ACCESS + name + " OBJ" + (split[1].length() > 1 ? ", " : "") + split[1].substring(0, split[1].length() - 1), null);
+							return ctx.prev().varCtx(memberAccess, off + 1, put, ctx);
+						}
+					}
+				}
 			}
 			return super.varCtx(memberAccess, off, put, ctx);
 		}

@@ -1,5 +1,6 @@
 package commands.libs;
 
+import java.awt.Component;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.Comparator;
@@ -73,6 +74,9 @@ public class BuiltInLibs
 			Script.expose(Double.class, false);
 		});
 		Script.add("Array", () -> Script.expose(Array.class, true));
-		Script.add("JBuilder", () -> Script.expose(JBuilder.class, true));
+		Script.add("JBuilder", () ->
+		{
+			Script.expose(JBuilder.class, Script.safeExposeAndDeclaredBy(JBuilder.class), Script.SAFE_CLASS_EXPOSE_FILTER, false);
+		});
 	}
 }

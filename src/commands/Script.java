@@ -58,6 +58,7 @@ public class Script
 {
 	private static final LinkedHashMap<String, Command> CMDS = new LinkedHashMap<String, Command>();
 	private static final HashMap<String, ScriptObject<?>> OBJECTS = new HashMap<String, ScriptObject<?>>();
+	private static final HashMap<Class<?>, ScriptObject<?>> OBJECTS_BY_CLASS = new HashMap<>();
 	private static final HashMap<String, Library> LIBS = new HashMap<>();
 	
 	public static final String COMMENT = "//";
@@ -390,6 +391,10 @@ public class Script
 		}
 	}
 	
+	public static ExpPredicate safeExposeAndDeclaredBy(Class<?> cl)
+	{
+		return (m, r) -> m.getDeclaringClass().equals(cl) && SAFE_EXPOSE_FILTER.test(m, r);
+	}
 	public static final ExpPredicate SAFE_EXPOSE_FILTER = (ex, rec) ->
 	{
 		int mods = ex.getModifiers();
@@ -491,7 +496,7 @@ public class Script
 		ScriptObject<SO> so = new ScriptObject<SO>(type, desc, cl);
 		if (OBJECTS.put(type, so) != null)
 			throw new IllegalArgumentException("Cannot register two ScriptObject types of the same name: " + type);
-		
+		OBJECTS_BY_CLASS.put(cl, so);
 		return so;
 	}
 	
@@ -499,6 +504,7 @@ public class Script
 	{
 		if (OBJECTS.put(so.getTypeName(), so) != null)
 			throw new IllegalArgumentException("Cannot register two ScriptObject types of the same name: " + so.getTypeName());
+		OBJECTS_BY_CLASS.put(so.argOf().cls, so);
 		return so;
 	}
 	
@@ -516,7 +522,12 @@ public class Script
 		{
 			Executable e = (Executable) m;
 			Class<?> ret = getReturnType(e);
-			good = CmdArg.getArgFor(ret) != null;
+			good = CmdArg.getArgFor(ret) != null || (recursive && ret.getConstructors().length > 0);
+			if (!good)
+				return false;
+			Class<?> decl = m.getDeclaringClass();
+			if (!Modifier.isStatic(m.getModifiers()))
+				good = CmdArg.getArgFor(decl) != null || (recursive && decl.getConstructors().length > 0);
 			Class<?>[] params = e.getParameterTypes();
 			for (int i = 0; good && i < params.length; i++)
 				good = CmdArg.getArgFor(params[i]) != null || (recursive && params[i].getConstructors().length > 0);
@@ -542,6 +553,12 @@ public class Script
 	public static ScriptObject<?> getType(String name)
 	{
 		return OBJECTS.get(name);
+	}
+	
+	@SuppressWarnings("unchecked")
+	public static <T> ScriptObject<T> getType(Class<T> of)
+	{
+		return (ScriptObject<T>) OBJECTS_BY_CLASS.get(of);
 	}
 	
 	public static Command[] getAllCommands()
@@ -1518,6 +1535,34 @@ public class Script
 		}
 		
 		return access.toArray(new String[access.size()]);
+	}
+	public static String[] objCallOf(String call)
+	{
+		ArrayList<String> tokens = new ArrayList<String>();
+		
+		String str = call.trim();
+		
+		String tok = "";
+		
+		QTRACK.reset();
+		SYNTRACK.reset();
+		for (int i = 0; i < str.length(); i++)
+		{
+			char parse = str.charAt(i);
+			QTRACK.track(parse);
+			SYNTRACK.track(parse, QTRACK.inside());
+			
+			if (parse != TOK_S || QTRACK.inside() || (SYNTRACK.insideOne() && !PARTRACK.justEntered()))
+				tok += parse;
+			else if (!tok.isBlank())
+			{
+				tokens.add(tok);
+				tok = "";
+			}
+			if (i == str.length() - 1 && !tok.isBlank())
+				tokens.add(tok);
+		}
+		return tokens.toArray(new String[tokens.size()]);
 	}
 	public static String[] tokensOf(String line)
 	{
