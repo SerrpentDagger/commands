@@ -1,8 +1,8 @@
 package commands.libs;
 
 import java.awt.Component;
-import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
+import java.awt.FlowLayout;
+import java.awt.GridLayout;
 import java.util.Comparator;
 import java.util.Random;
 import java.util.function.BiConsumer;
@@ -17,10 +17,16 @@ import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import javax.swing.JButton;
+import javax.swing.JComboBox;
+import javax.swing.JTextField;
+import javax.swing.JToggleButton;
+
 import commands.CmdArg;
 import commands.Script;
 import commands.ScriptObject;
 import jbuilder.JBuilder;
+import main.Timer;
 
 public class BuiltInLibs
 {
@@ -74,9 +80,20 @@ public class BuiltInLibs
 			Script.expose(Double.class, false);
 		});
 		Script.add("Array", () -> Script.expose(Array.class, true));
-		Script.add("JBuilder", () ->
+		Script.add("JBuilder", () -> 
 		{
-			Script.expose(JBuilder.class, Script.safeExposeAndDeclaredBy(JBuilder.class), Script.SAFE_CLASS_EXPOSE_FILTER, false);
+			Script.exposeDeclaredBy
+			(
+					Component.class,
+					JTextField.class,
+					JButton.class,
+					JToggleButton.class,
+					JComboBox.class,
+					FlowLayout.class,
+					GridLayout.class,
+					JBuilder.class
+			);
 		});
+		Script.add("Timer", () -> Script.expose(Timer.class, true));
 	}
 }

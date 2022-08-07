@@ -447,9 +447,27 @@ public class Script
 				out.add(expose(cl, memberIf, iff, recursive));
 		return out.toArray(new ScriptObject<?>[out.size()]);
 	}
+	public static <T> ScriptObject<T> exposeDeclaredBy(Class<T> cl)
+	{
+		return expose(cl, safeExposeAndDeclaredBy(cl), SAFE_CLASS_EXPOSE_FILTER, false);
+	}
+	public static ScriptObject<?>[] exposeDeclaredBy(Class<?>... cl)
+	{
+		ScriptObject<?>[] out = new ScriptObject<?>[cl.length];
+		for (int i = 0; i < cl.length; i++)
+			out[i] = exposeDeclaredBy(cl[i]);
+		return out;
+	}
 	public static <T> ScriptObject<T> expose(Class<T> cl, boolean recursive)
 	{
 		return expose(cl, SAFE_EXPOSE_FILTER, SAFE_CLASS_EXPOSE_FILTER, recursive);
+	}
+	public static ScriptObject<?>[] expose(boolean recursive, Class<?>... cl)
+	{
+		ScriptObject<?>[] out = new ScriptObject<?>[cl.length];
+		for (int i = 0; i < cl.length; i++)
+			out[i] = expose(cl[i], recursive);
+		return out;
 	}
 	@SuppressWarnings("unchecked")
 	public static <T> ScriptObject<T> expose(Class<T> cl, ExpPredicate memberIf, ClsPredicate classIf, boolean recursive)
@@ -1008,6 +1026,7 @@ public class Script
 		else
 			return arrOf(rets);
 	}).setVarArgs();
+	public static final Command ECH = overload("~", ECHO, "Just a shorter name.", (objs) -> objs, ECHO.args).setVarArgs();
 	public static final Command RUN_SCRIPT = add("run_script", Script.VOID, "Runs the given script. Booleans determine whether variables in this script will be given to other before being run, and whether variables in other will be pulled to this script once finished.", CmdArg.STRING, CmdArg.BOOLEAN, CmdArg.BOOLEAN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
 	{
 		String name = (String) objs[0];

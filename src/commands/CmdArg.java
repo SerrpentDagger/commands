@@ -11,8 +11,10 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 
 import commands.BooleanExp.Comp;
+import commands.CmdArg.VarCmdArg;
 import commands.DoubleExp.Oper;
 import commands.ScajlVariable.SVArray;
+import commands.ScajlVariable.SVExec;
 import commands.ScajlVariable.SVJavObj;
 import commands.ScajlVariable.SVTokGroup;
 import utilities.ArrayUtils;
@@ -571,6 +573,27 @@ public abstract class CmdArg<T>
 		}
 	};
 	
+	public static final VarCmdArg<SVExec> SVEXEC = new VarCmdArg<SVExec>("Executable", SVExec.class)
+	{
+		@Override
+		public SVExec parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
+		{
+			if (vars[off] instanceof SVExec)
+				return (SVExec) vars[off];
+			Label lab = LABEL.parse(tokens, vars, off, ctx);
+			if (lab == null)
+				return null;
+			String callLab = "" + Script.SCOPE_S +  Script.CALL.name + " " + lab.name + Script.SCOPE_E;
+			return new SVExec("" + Script.REF + callLab, callLab, null);
+		}
+		
+		@Override
+		public ScajlVariable unparse(SVExec obj)
+		{
+			return obj;
+		}
+	};
+	
 	public static final CmdArg<String> STRING = new CmdArg<String>("String", String.class)
 	{
 		@Override
@@ -922,14 +945,12 @@ CmdArg.funcInterfaceOf(Pos3dVal.class, (matching) -> (pos) -> (double) matching.
 			typeName += "'" + paramArgs[i].arg.type + "':" + paramNames[i] + (i == pCount - 1 ? " " : ", ");
 		typeName += "-> " + retArg.type + ")";
 		
-		CmdArg<X> arg = new CmdArg<X>(typeName, funcInt)
+		VarCmdArg<X> arg = new VarCmdArg<X>(typeName, funcInt)
 		{
 			@Override
-			public X parse(String trimmed, String[] tokens, Script ctx)
+			public X parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
 			{
-				Label lab = LABEL.parse(trimmed, tokens, ctx);
-				if (lab == null)
-					return null;
+				SVExec exec = SVEXEC.parse(tokens, vars, off, ctx);
 				return transformer.transform((objs) ->
 				{
 					if (objs.length != pCount)
@@ -938,18 +959,20 @@ CmdArg.funcInterfaceOf(Pos3dVal.class, (matching) -> (pos) -> (double) matching.
 					for (int i = 0; i < objs.length; i++)
 						sets[i] = new VarSet(paramNames[i], paramArgs[i].castAndUnparse(objs[i], ctx));
 					
-					ctx.runFrom(lab, sets);
+					for (VarSet set : sets)
+						ctx.putVar(set.var, set.set);
+					exec.eval(ctx);
 					
 					if (isVoid)
 						return null;
-					ScajlVariable[] vars = new ScajlVariable[] { ctx.prev() };
+					ScajlVariable[] outVars = new ScajlVariable[] { ctx.prev() };
 					Object out;
 					if (retArg instanceof VarCmdArg)
-						out = retArg.parse(null, vars, 0, ctx);
+						out = retArg.parse(null, outVars, 0, ctx);
 					else
-						out = retArg.parse(new String[] { vars[0].val(ctx) }, vars, 0, ctx);
+						out = retArg.parse(new String[] { outVars[0].val(ctx) }, outVars, 0, ctx);
 					if (out == null)
-						ctx.parseExcept("Invalid return value: " + vars[0].raw(), "The functional interface expects a return of type: " + retArg.type);
+						ctx.parseExcept("Invalid return value: " + outVars[0].raw(), "The functional interface expects a return of type: " + retArg.type);
 					return out;
 				});
 			}
