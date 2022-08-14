@@ -1,6 +1,7 @@
 package commands;
 
 import java.awt.AWTException;
+import java.awt.GridLayout;
 import java.awt.MouseInfo;
 import java.awt.Point;
 import java.awt.Robot;
@@ -32,6 +33,10 @@ import java.util.function.Consumer;
 import java.util.function.IntPredicate;
 import java.util.regex.Pattern;
 
+import javax.swing.JFrame;
+import javax.swing.JTextArea;
+import javax.swing.JTextField;
+
 import arrays.AUtils;
 import commands.CmdArg.TypeArg;
 import commands.CmdArg.VarCmdArg;
@@ -50,6 +55,7 @@ import commands.ScajlVariable.SVVal;
 import commands.Scope.SNode;
 import commands.libs.Bool;
 import commands.libs.BuiltInLibs;
+import jbuilder.JBuilder;
 import mod.serpentdagger.artificialartificing.utils.group.MixedPair;
 import utilities.ArrayUtils;
 import utilities.StringUtils;
@@ -1885,6 +1891,105 @@ public class Script
 	
 	////////////////////////////////////////////////
 	
+	public static JBuilder createDefaultWindow()
+	{
+		JBuilder build = new JBuilder(new GridLayout(4, 2, 7, 7));
+		build.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+		build.addLabel("Type commands, and press \"Run\" to run the script. print_debug is on by default.");
+		JTextArea area = build.addTextArea(6, 5, true);
+		JTextArea[] out = new JTextArea[1];
+		out[0] = build.addTextArea(6, 5, false);
+		build.addButton("Run", () ->
+		{
+			try
+			{
+				Script script = new Script(area.getText());
+				out[0].setText("");
+				setJBuilderCallbacks(script, out[0]);
+				script.printDebug(true);
+				Thread runThread = new Thread(() ->
+				{
+					script.run();
+				}, "Debug Thread");
+				runThread.start();
+			}
+			catch (AWTException e)
+			{
+				JBuilder.error("Unable to create Robot. Failed to start.");
+				e.printStackTrace();
+			}
+		});
+		return build.showFrame().center();
+	}
+	public static void setJBuilderCallbacks(Script script, JTextArea print)
+	{
+		script.setPrintCallback((str) ->
+		{
+			String text = print.getText();
+			int stars = endStarCount(text);
+			if (stars != -1)
+			{
+				String without = text.substring(0, text.length() - stars);
+				if (!str.isEmpty() && without.endsWith(str + "\n"))
+				{
+					print.append("*");
+					print.setCaretPosition(print.getDocument().getLength());
+					return;
+				}
+				if (stars > 0)
+					print.append("\n");
+			}
+			print.append(str + "\n");
+			print.setCaretPosition(print.getDocument().getLength());
+		});
+		script.setErrorCallback((err) -> JBuilder.error(err).showFrame().center());
+		script.setExceptionCallback((t) -> JBuilder.info("Exception encountered at line: " + (script.parseLine + 1), t.toString()).showFrame().center());
+		script.setUserReqestType((ctx, vars, type, prompt) -> userReqType(ctx, vars, type, prompt));
+		script.setParseExceptionCallback((parseEx, str) -> JBuilder.error(str).showFrame().center());
+	}
+	private static int endStarCount(String str)
+	{
+		int count = 0;
+		for (int i = str.length() - 1; i >= 0 && str.charAt(i) == '*'; i--)
+			count++;
+		return count;
+	}
+	public static boolean userReqType(Script ctx, String[] vars, CmdArg<?> type, String prompt)
+	{
+		AtomicBoolean bool = new AtomicBoolean(false);
+		while (!bool.get())
+		{
+			JBuilder b = new JBuilder(new GridLayout(vars.length + 2, 2, 7, 7));
+			
+			b.addLabel("Variable type: " + prompt);
+			b.addLabel("");
+			
+			JTextField[] fields = new JTextField[vars.length];
+			
+			for (int i = 0; i < vars.length; i++)
+			{
+				b.addLabel(vars[i]);
+				fields[i] = b.addTextField();
+			}
+			
+			b.addButton("Confirm", () ->
+			{
+				for (int i = 0; i < vars.length; i++)
+				{
+					String in = fields[i].getText().trim();
+					if (!ctx.putVarType(vars[i], in, type, prompt))
+						return;
+				}
+				bool.set(true);
+				b.go();
+				b.dispose();
+			});
+			
+			b.showFrame().center().waitFor();
+		}
+		return true;
+	}
+	
 	public Script(String str) throws AWTException
 	{
 		this(new Scanner(str));
@@ -2196,6 +2301,8 @@ public class Script
 		parseLine = to.line + 1;
 		if (to.isScoped)
 			scope.push(to);
+		if (printingDebug())
+			debugger.info("RUNNING FROM:", to.name, "");
 	}
 	
 	private SNode popStack()
@@ -2205,6 +2312,8 @@ public class Script
 		parseLine = ent.from;
 		if (ent.to.isScoped)
 			return scope.pop();
+		if (printingDebug())
+			debugger.info("RETURNING FROM:", ent.to.name, "");
 		return scope.getLast();
 	}
 	

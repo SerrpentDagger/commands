@@ -2,7 +2,9 @@ package commands.libs;
 
 import java.awt.Component;
 import java.awt.FlowLayout;
+import java.awt.Font;
 import java.awt.GridLayout;
+import java.lang.reflect.Field;
 import java.util.Comparator;
 import java.util.Random;
 import java.util.function.BiConsumer;
@@ -19,6 +21,7 @@ import java.util.regex.Pattern;
 
 import javax.swing.JButton;
 import javax.swing.JComboBox;
+import javax.swing.JComponent;
 import javax.swing.JTextField;
 import javax.swing.JToggleButton;
 
@@ -26,6 +29,7 @@ import commands.CmdArg;
 import commands.Script;
 import commands.ScriptObject;
 import jbuilder.JBuilder;
+import jbuilder.JBuilder.OnClose;
 import main.Timer;
 
 public class BuiltInLibs
@@ -51,8 +55,8 @@ public class BuiltInLibs
 			Double.class,
 			String.class
 		};
-//		Script.exposeAll(toExp, Script.SAFE_CLASS_EXPOSE_FILTER,
-//				(member, rec) -> member instanceof Field && Script.SAFE_EXPOSE_FILTER.test(member, rec), false);
+		Script.exposeAll(toExp, Script.SAFE_CLASS_EXPOSE_FILTER,
+				(member, rec) -> member instanceof Field && Script.SAFE_EXPOSE_FILTER.test(member, rec), false);
 		
 		ScriptObject<Num> num = Script.expose(Num.class, true);
 		num.setDescription("A simple container for numbers that can be stored in Java objects like ArrayLists.");
@@ -82,8 +86,10 @@ public class BuiltInLibs
 		Script.add("Array", () -> Script.expose(Array.class, true));
 		Script.add("JBuilder", () -> 
 		{
-			Script.exposeDeclaredBy
+			CmdArg.funcInterfaceOf(OnClose.class, (match) -> (b) -> match.run(b));
+			ScriptObject<?>[] exp = Script.exposeDeclaredBy
 			(
+					Font.class,
 					Component.class,
 					JTextField.class,
 					JButton.class,
@@ -93,6 +99,7 @@ public class BuiltInLibs
 					GridLayout.class,
 					JBuilder.class
 			);
+			Script.exposeMethodsByName(JComponent.class, exp[exp.length - 1], false, "setFont");
 		});
 		Script.add("Timer", () -> Script.expose(Timer.class, true));
 	}
