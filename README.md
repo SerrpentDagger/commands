@@ -3,4 +3,7 @@ Scajl (pronounced as 'scale') is an easy-to-implement, easy-to-learn scripting l
 provided in the library which use reflection to automatically expose Java methods, classes, and other structures into Scajl.
 
 
-This guide is split into two parts: "[Implementation](docs/Implementation)," and "[Scripting](docs/Scripting)". Implementation describes how the app developer may implement Scajl into their program, while Scripting describes how the end user may write scripts using the Scajl environment exposed to them.
+This guide is split into two parts: "Implementation," and "Scripting". Implementation describes how the app developer may implement Scajl into their program, while Scripting describes how the end user may write scripts using the Scajl environment exposed to them.
+
+## [Implementation](docs/Implementation)
+## [Scripting](docs/Scripting)
