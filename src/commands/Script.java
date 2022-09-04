@@ -707,6 +707,24 @@ public class Script
 		
 		return ctx.prev();
 	}).rawArg(0).setVarArgs();
+	public static final Command TEST = add("test", BOOL, "Returns true if each variable matches its corresponding Pattern.", CmdArg.VAR_PATTERN).setFunc((ctx, objs) ->
+	{
+		for (VarPattern pat : (VarPattern[]) objs[0])
+			if (!pat.pattern.test(pat.var, ctx))
+				return FALSE;
+		return TRUE;
+	}).setVarArgs();
+	public static final Command ENFORCE = add("enforce", BOOL, "Enforces the structure of each variable to match that of the corresponding Pattern. Primitive values will be overwritten in the appropriate scope. Containers will be updated by refererence if possible. Returns whether or not a variable was enforced.", CmdArg.VAR_PATTERN).setFunc((ctx, objs) ->
+	{
+		boolean upd = false;
+		for (VarPattern pat : (VarPattern[]) objs[0])
+			if (pat.name != null && !pat.pattern.test(pat.var, ctx))
+			{
+				ctx.putVar(pat.name, pat.pattern.enforce(pat.var, ctx));
+				upd = true;
+			}
+		return boolOf(upd);
+	}).setVarArgs();
 	public static final Command IS_VAR = add("is_var", BOOL, "Checks whether or not the token is a variable.", CmdArg.TOKEN).setFunc((ctx, objs) ->
 	{
 		String[] vars = (String[]) objs[0];

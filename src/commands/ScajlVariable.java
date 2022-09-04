@@ -1,6 +1,7 @@
 package commands;
 
 import java.lang.ref.WeakReference;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -11,6 +12,7 @@ import java.util.regex.Pattern;
 
 import arrays.AUtils;
 import arrays.AUtils.Ind;
+import commands.Script.CommandParseException;
 import mod.serpentdagger.artificialartificing.utils.group.MixedPair;
 import utilities.ArrayUtils;
 import utilities.StringUtils;
@@ -64,24 +66,19 @@ public abstract class ScajlVariable
 		}
 		return null;
 	}
+	protected ScajlVariable setSelf(SVMember selfCtx)
+	{
+		this.selfCtx = new WeakReference<SVMember>(selfCtx);
+		return this;
+	}
+	public abstract boolean test(ScajlVariable other, Script ctx);
+	public abstract ScajlVariable enforce(ScajlVariable other, Script ctx);
 	
 	@Override
 	public String toString()
 	{
 		return raw();
 	}
-	
-/*	public ScajlVariable[] splitTokens(IntPredicate rawDefault, Script ctx)
-	{
-		String[] split = Script.tokensOf(input);
-		ScajlVariable[] out = new ScajlVariable[split.length];
-		if (out.length != 1)
-			for (int i = 0; i < out.length; i++)
-				out[i] = getVar(split[i], rawDefault.test(i), ctx);
-		else
-			out[0] = this;
-		return out;
-	}*/
 	
 	@Override
 	public abstract ScajlVariable clone();
@@ -126,6 +123,18 @@ public abstract class ScajlVariable
 		{
 			return modless;
 		}
+		
+		@Override
+		public boolean test(ScajlVariable other, Script ctx)
+		{
+			return other instanceof SVVal && other != NULL;
+		}
+		
+		@Override
+		public ScajlVariable enforce(ScajlVariable other, Script ctx)
+		{
+			return clone();
+		}
 
 		@Override
 		public SVVal clone()
@@ -161,6 +170,18 @@ public abstract class ScajlVariable
 		}
 		
 		@Override
+		public boolean test(ScajlVariable other, Script ctx)
+		{
+			return eval(ctx).test(other, ctx);
+		}
+		
+		@Override
+		public ScajlVariable enforce(ScajlVariable other, Script ctx)
+		{
+			return clone();
+		}
+		
+		@Override
 		public SVRef clone()
 		{
 			return new SVRef(input, modless);
@@ -193,6 +214,18 @@ public abstract class ScajlVariable
 		public String raw()
 		{
 			return Script.STRING_CHAR + unraw + Script.STRING_CHAR;
+		}
+		
+		@Override
+		public boolean test(ScajlVariable other, Script ctx)
+		{
+			return other instanceof SVString;
+		}
+		
+		@Override
+		public ScajlVariable enforce(ScajlVariable other, Script ctx)
+		{
+			return clone();
 		}
 		
 		@Override
@@ -276,6 +309,34 @@ public abstract class ScajlVariable
 		}
 		
 		@Override
+		public boolean test(ScajlVariable other, Script ctx)
+		{
+			if (!(other instanceof SVJavObj))
+				return false;
+			SVJavObj jav = (SVJavObj) other;
+			return AUtils.containsAll(jav.value, value, (a, b) -> b.getClass().isAssignableFrom(a.getClass()));
+		}
+		
+		@Override
+		public ScajlVariable enforce(ScajlVariable other, Script ctx)
+		{
+			if (!(other instanceof SVJavObj))
+				return clone();
+			SVJavObj jav = (SVJavObj) other;
+			ArrayList<Object> newVal = new ArrayList<>();
+			ArrayList<Object> unmatched = new ArrayList<>();
+			unmatched.addAll(Arrays.asList(value));
+			for (int i = 0; i < jav.value.length; i++)
+			{
+				newVal.add(jav.value[i]);
+				final Class<?> cl = jav.value[i].getClass();
+				unmatched.removeIf((un) -> un.getClass().isAssignableFrom(cl));
+			}
+			newVal.addAll(unmatched);
+			return new SVJavObj(null, null, null, newVal.toArray());
+		}
+		
+		@Override
 		public SVJavObj clone()
 		{
 			return new SVJavObj(input, modless, selfCtx.get(), value);
@@ -305,20 +366,25 @@ public abstract class ScajlVariable
 		public VarCtx varCtx(String[] memberAccess, int off, boolean put, Script ctx)
 		{
 			SVMember self = selfCtx.get();
-			ScajlVariable var = getVar(memberAccess[off], false, ctx, self);
-			if (var == self)
+			if (memberAccess[off].equals(Script.ARR_SELF))
 			{
-				if (put)
-					ctx.parseExcept("Invalid index: " + Script.ARR_SELF, "Cannot set the '" + Script.ARR_SELF + "' value of a variable directly");
 				if (off == memberAccess.length - 1)
+				{
+					if (put)
+						ctx.parseExcept("Invalid index: " + Script.ARR_SELF, "Cannot set the '" + Script.ARR_SELF + "' value of a variable directly");
 					return new VarCtx(() -> self);
+				}
 				else
 					return self.varCtx(memberAccess, off + 1, put, ctx);
 			}
+			if (hasAcc(memberAccess[off]))
+				return memCtx(memberAccess, off, memberAccess[off], put, ctx);				
+			ScajlVariable var = getVar(memberAccess[off], false, ctx, self);
 			String val = var.val(ctx);
 			return memCtx(memberAccess, off, val, put, ctx);
 		}
 		
+		protected abstract boolean hasAcc(String acc);
 		protected abstract VarCtx memCtx(String[] memberAccess, int off, String accVal, boolean put, Script ctx);
 	}
 	
@@ -344,6 +410,12 @@ public abstract class ScajlVariable
 			this.map = map;
 		}
 
+		@Override
+		protected boolean hasAcc(String acc)
+		{
+			return acc.equals(Script.ARR_LEN) || map.containsKey(acc);
+		}
+		
 		@Override
 		public VarCtx memCtx(String[] memberAccess, int off, String accVal, boolean put, Script ctx)
 		{
@@ -382,19 +454,65 @@ public abstract class ScajlVariable
 		}
 
 		@Override
-		public ScajlVariable clone()
+		public boolean test(ScajlVariable other, Script ctx)
 		{
-			LinkedHashMap<String, ScajlVariable> deepCopy = new LinkedHashMap<>();
-			SVMap clone = new SVMap(input, modless, deepCopy, selfCtx.get());
-			Iterator<Entry<String, ScajlVariable>> it = map.entrySet().iterator();
+			if (!(other instanceof SVMap))
+				return false;
+			SVMap oth = (SVMap) other;
+			Iterator<String> it = map.keySet().iterator();
 			while (it.hasNext())
 			{
-				Entry<String, ScajlVariable> ent = it.next();
-				ScajlVariable cop;
-				deepCopy.put(ent.getKey(), cop = ent.getValue().clone());
-				cop.selfCtx = new WeakReference<>(clone);
+				String key = it.next();
+				ScajlVariable v1 = map.get(key), v2 = oth.map.get(key);
+				if (v2 == null || !v1.test(v2, ctx))
+					return false;
 			}
-			return clone;
+			return true;
+		}
+		
+		@Override
+		public ScajlVariable enforce(ScajlVariable other, Script ctx)
+		{
+			if (!(other instanceof SVMap))
+				return clone();
+			SVMap oth = (SVMap) other;
+			Iterator<String> it = map.keySet().iterator();
+			while (it.hasNext())
+			{
+				String key = it.next();
+				ScajlVariable v1 = map.get(key), v2 = oth.map.get(key);
+				if (v2 == null || !v1.test(v2, ctx))
+					oth.map.put(key, v1.enforce(v2, ctx).setSelf(oth));
+			}
+			return oth;
+		}
+		
+		@Override
+		public ScajlVariable clone()
+		{
+			try
+			{
+				LinkedHashMap<String, ScajlVariable> deepCopy = new LinkedHashMap<>();
+				SVMap clone = new SVMap(input, modless, deepCopy, selfCtx.get());
+				Iterator<Entry<String, ScajlVariable>> it = map.entrySet().iterator();
+				while (it.hasNext())
+				{
+					Entry<String, ScajlVariable> ent = it.next();
+					ScajlVariable cop;
+					deepCopy.put(ent.getKey(), cop = ent.getValue().clone());
+					cop.selfCtx = new WeakReference<>(clone);
+				}
+				return clone;				
+			}
+			catch (StackOverflowError e)
+			{
+				throw new CommandParseException("Unable to deep-copy map containing itself.");
+			}
+		}
+		
+		public LinkedHashMap<String, ScajlVariable> getMap()
+		{
+			return map;
 		}
 	}
 	
@@ -437,6 +555,13 @@ public abstract class ScajlVariable
 			}
 			return clone;
 		}
+		
+		@Override
+		protected boolean hasAcc(String acc)
+		{
+			return false;
+		}
+		
 		@Override
 		public VarCtx memCtx(String[] memberAccess, int off, String accVal, boolean put, Script ctx)
 		{
@@ -446,6 +571,20 @@ public abstract class ScajlVariable
 			if (put || memberAccess != null && off != memberAccess.length)
 				ctx.parseExcept("Invalid member access on Token Group", "The indexed variable is not a type which can be indexed.", "From access: " + StringUtils.toString(memberAccess, "", "" + Script.ARR_ACCESS, ""));
 			return new VarCtx(() -> this);
+		}
+		
+		@Override
+		public boolean test(ScajlVariable other, Script ctx)
+		{
+			return false;
+		}
+		
+		@Override
+		public ScajlVariable enforce(ScajlVariable other, Script ctx)
+		{
+			if (!(other instanceof SVTokGroup))
+				return clone();
+			return null;
 		}
 		
 		public ScajlVariable[] getArray()
@@ -493,6 +632,12 @@ public abstract class ScajlVariable
 		}
 		
 		@Override
+		protected boolean hasAcc(String acc)
+		{
+			return acc.equals(Script.ARR_LEN);
+		}
+		
+		@Override
 		public VarCtx memCtx(String[] memberAccess, int off, String accVal, boolean put, Script ctx)
 		{
 			if (accVal.equals(Script.ARR_LEN) && off == memberAccess.length - 1)
@@ -501,11 +646,7 @@ public abstract class ScajlVariable
 					Integer len = CmdArg.INT.parse(var.val(ctx));
 					if (len == null)
 						ctx.parseExcept("Invalid token resolution for Array length", "Array lengths must be specified as numbers.");
-					int oldLen = array.length;
-					array = Arrays.copyOf(array, len);
-					if (len > oldLen)
-						Arrays.fill(array, oldLen, len, NULL);
-					length = new SVVal(len, this);
+					resize(len);
 				});
 			else
 			{
@@ -522,6 +663,42 @@ public abstract class ScajlVariable
 					});
 				return array[ind].varCtx(memberAccess, off + 1, put, ctx);
 			}
+		}
+		public void resize(int len)
+		{
+			int oldLen = array.length;
+			array = Arrays.copyOf(array, len);
+			if (len > oldLen)
+				Arrays.fill(array, oldLen, len, NULL);
+			length = new SVVal(len, this);
+		}
+		
+		@Override
+		public boolean test(ScajlVariable other, Script ctx)
+		{
+			if (!(other instanceof SVArray))
+				return false;
+			SVArray oth = (SVArray) other;
+			if (oth.array.length < array.length)
+				return false;
+			for (int i = 0; i < array.length; i++)
+				if (oth.array[i] == null || !array[i].test(oth.array[i], ctx))
+					return false;
+			return true;
+		}
+		
+		@Override
+		public ScajlVariable enforce(ScajlVariable other, Script ctx)
+		{
+			if (!(other instanceof SVArray))
+				return clone();
+			SVArray oth = (SVArray) other;
+			if (oth.array.length < array.length)
+				oth.resize(array.length);
+			for (int i = 0; i < array.length; i++)
+				if (oth.array[i] == null || !array[i].test(other, ctx))
+					oth.array[i] = array[i].enforce(oth.array[i], ctx).setSelf(oth);
+			return oth;
 		}
 		
 		@Override
@@ -574,6 +751,18 @@ public abstract class ScajlVariable
 			return Script.REF + modless;
 		}
 
+		@Override
+		public boolean test(ScajlVariable other, Script ctx)
+		{
+			return other instanceof SVExec;
+		}
+		
+		@Override
+		public ScajlVariable enforce(ScajlVariable other, Script ctx)
+		{
+			return clone();
+		}
+		
 		@Override
 		public SVExec clone()
 		{

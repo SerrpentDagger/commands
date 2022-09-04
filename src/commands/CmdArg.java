@@ -11,7 +11,6 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 
 import commands.BooleanExp.Comp;
-import commands.CmdArg.VarCmdArg;
 import commands.DoubleExp.Oper;
 import commands.ScajlVariable.SVArray;
 import commands.ScajlVariable.SVExec;
@@ -711,6 +710,28 @@ public abstract class CmdArg<T>
 			return ctx.getLabel(trimmed);
 		}
 	};
+	
+	public static final VarCmdArg<VarPattern> VAR_PATTERN = new VarCmdArg<VarPattern>("Variable Pattern", VarPattern.class)
+	{
+		@Override
+		public boolean rawToken(int ind)
+		{
+			return ind == 0;
+		}
+		
+		@Override
+		public int tokenCount()
+		{
+			return 2;
+		}
+		
+		@Override
+		public VarPattern parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
+		{
+			ScajlVariable var = ctx.getVar(tokens[off], false, null);
+			return new VarPattern(var, vars[off + 1], tokens[off]);
+		}
+	}.reg();
 	
 	public static final VarCmdArg<VarSet> VAR_SET = new VarCmdArg<VarSet>("VarName Value", VarSet.class)
 	{
