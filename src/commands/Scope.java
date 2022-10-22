@@ -136,6 +136,11 @@ public class Scope
 				return parent.get(name);
 			return out;
 		}
+		
+		public Label getLabel()
+		{
+			return label;
+		}
 	}
 	
 	////////////////////////////////////////////

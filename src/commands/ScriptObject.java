@@ -6,6 +6,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 
+import annotations.ScajlClone;
 import commands.CmdArg.ObjConstruct;
 import commands.CmdArg.VarCmdArg;
 import commands.ScajlVariable.SVJavObj;
@@ -168,7 +169,7 @@ public class ScriptObject<T>
 	
 	public String getInfoString()
 	{
-		String inf = this.getTypeName() + " | Inline formats: ";
+		String inf = (ScajlClone.isSC(cmdArg.cls) ? Script.RAW_CONTENTS : "") + getTypeName() + " | Inline formats: ";
 		CmdArg<?>[] inline = CmdArg.ARGS.get(cmdArg.cls).values().toArray(new CmdArg<?>[0]);
 		inf += inline.length > 0 ? StringUtils.toString(inline, (arg) -> arg.getInfoString(), "'", "', '", "'") : "None";
 		inf += ", Desc: " + this.getDescription();

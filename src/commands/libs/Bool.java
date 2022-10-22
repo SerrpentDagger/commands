@@ -1,6 +1,8 @@
 package commands.libs;
 
-public class Bool
+import annotations.ScajlClone;
+
+public class Bool implements ScajlClone<Bool>
 {
 	private boolean val = false;
 	
@@ -48,5 +50,11 @@ public class Bool
 	public boolean get()
 	{
 		return val;
+	}
+
+	@Override
+	public Bool sjClone()
+	{
+		return new Bool(val);
 	}
 }

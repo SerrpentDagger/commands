@@ -10,11 +10,11 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
-import arrays.AUtils;
-import arrays.AUtils.Ind;
+import annotations.ScajlClone;
 import commands.Script.CommandParseException;
 import mod.serpentdagger.artificialartificing.utils.group.MixedPair;
 import utilities.ArrayUtils;
+import utilities.ArrayUtils.*;
 import utilities.StringUtils;
 
 public abstract class ScajlVariable
@@ -127,7 +127,13 @@ public abstract class ScajlVariable
 		@Override
 		public boolean test(ScajlVariable other, Script ctx)
 		{
-			return other instanceof SVVal && other != NULL;
+			boolean t = other instanceof SVVal && other != NULL;
+			if (!t)
+				return t;
+			Double d = CmdArg.DOUBLE.parse(modless);
+			if (d == null)
+				return t;
+			return CmdArg.DOUBLE.parse(((SVVal) other).modless) != null;
 		}
 		
 		@Override
@@ -314,7 +320,7 @@ public abstract class ScajlVariable
 			if (!(other instanceof SVJavObj))
 				return false;
 			SVJavObj jav = (SVJavObj) other;
-			return AUtils.containsAll(jav.value, value, (a, b) -> b.getClass().isAssignableFrom(a.getClass()));
+			return ArrayUtils.containsAll(jav.value, value, (a, b) -> b.getClass().isAssignableFrom(a.getClass()));
 		}
 		
 		@Override
@@ -339,7 +345,10 @@ public abstract class ScajlVariable
 		@Override
 		public SVJavObj clone()
 		{
-			return new SVJavObj(input, modless, selfCtx.get(), value);
+			Object[] newVal = Arrays.copyOf(value, value.length);
+			for (int i = 0; i < newVal.length; i++)
+				newVal[i] = ScajlClone.tryClone(newVal[i]);
+			return new SVJavObj(input, modless, selfCtx.get(), newVal);
 		}
 	}
 	
@@ -840,7 +849,7 @@ public abstract class ScajlVariable
 			{
 				ScajlVariable unp = getVar(str.substring(1), false, ctx).eval(ctx);
 				if (unp instanceof SVTokGroup)
-					out = AUtils.replace(out, ((SVTokGroup) unp).array, i, ind);
+					out = ArrayUtils.replace(out, ((SVTokGroup) unp).array, i, ind);
 				else
 				{
 					out[i] = unp;

@@ -1,8 +1,9 @@
 package commands.libs;
 
+import annotations.ScajlClone;
 import utilities.StringUtils;
 
-public class Str
+public class Str implements ScajlClone<Str>
 {
 	public String val;
 	
@@ -66,5 +67,11 @@ public class Str
 	public String get()
 	{
 		return val;
+	}
+
+	@Override
+	public Str sjClone()
+	{
+		return new Str(val);
 	}
 }

@@ -9,6 +9,7 @@ import java.awt.event.KeyEvent;
 import java.awt.event.MouseEvent;
 import java.io.File;
 import java.io.FileNotFoundException;
+import java.lang.reflect.AccessibleObject;
 import java.lang.reflect.Array;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Executable;
@@ -37,7 +38,7 @@ import javax.swing.JFrame;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
 
-import arrays.AUtils;
+import annotations.NoExpose;
 import commands.CmdArg.TypeArg;
 import commands.CmdArg.VarCmdArg;
 import commands.Command.CommandResult;
@@ -249,8 +250,8 @@ public class Script
 		CmdArg<?>[] gArgs = new CmdArg<?>[] {};
 		if (isInst)
 		{
-			sArgs = AUtils.extendPre(sArgs, 1, (i) -> declArg);
-			gArgs = AUtils.extendPre(gArgs, 1, (i) -> declArg);
+			sArgs = ArrayUtils.extendPre(sArgs, 1, (i) -> declArg);
+			gArgs = ArrayUtils.extendPre(gArgs, 1, (i) -> declArg);
 		}
 		
 		out[0] = to == null ? add(gName, typeString, gDesc, gArgs) : to.add(gName, typeString, gDesc, gArgs); // Getter
@@ -312,7 +313,7 @@ public class Script
 				types[i] = CmdArg.wrap(types[i]);
 		boolean isInst = isM && !Modifier.isStatic(e.getModifiers());
 		if (isInst)
-			types = AUtils.extendPre(types, 1, (i) -> e.getDeclaringClass());
+			types = ArrayUtils.extendPre(types, 1, (i) -> e.getDeclaringClass());
 		boolean varArgs = e.isVarArgs();
 		if (varArgs)
 			types[types.length - 1] = types[types.length - 1].getComponentType();
@@ -406,6 +407,7 @@ public class Script
 		int mods = ex.getModifiers();
 		return Modifier.isPublic(mods)
 				&& !ex.isSynthetic()
+				&& !(ex instanceof AccessibleObject && ((AccessibleObject) ex).isAnnotationPresent(NoExpose.class))
 				&& Script.canAutoExpose(ex, rec);
 	};
 	public static final ClsPredicate SAFE_CLASS_EXPOSE_FILTER = (cl, rec) ->
@@ -413,10 +415,10 @@ public class Script
 		int mods = cl.getModifiers();
 		return Modifier.isPublic(mods)
 				&& !cl.isAnonymousClass()
-				&& !cl.isHidden()
 				&& !cl.isLocalClass()
 				&& cl.getSuperclass() != null
-				&& cl != Class.class;
+				&& cl != Class.class
+				&& cl.isAnnotationPresent(NoExpose.class);
 	};
 	public static Command[] exposeMethodsByName(Class<?> from, ScriptObject<?> to, boolean recursive, String... names)
 	{
@@ -725,6 +727,13 @@ public class Script
 			}
 		return boolOf(upd);
 	}).setVarArgs();
+	public static final Command ASSERT = add("assert", VOID, "Throws an exception if the strucure of each variable does not match that of the corresponding Pattern.", CmdArg.VAR_PATTERN).setFunc((ctx, objs) ->
+	{
+		for (VarPattern pat : (VarPattern[]) objs[0])
+			if (!pat.pattern.test(pat.var, ctx))
+				ctx.parseExcept("Illegal variable value", "Variable named '" + pat.name + "', with value '" + pat.var.raw() + "' does not match the required Pattern defined by the default '" + pat.pattern.raw() + "'");
+		return ctx.prev();
+	}).setVarArgs();
 	public static final Command IS_VAR = add("is_var", BOOL, "Checks whether or not the token is a variable.", CmdArg.TOKEN).setFunc((ctx, objs) ->
 	{
 		String[] vars = (String[]) objs[0];
@@ -783,7 +792,7 @@ public class Script
 			for (Object obj : jObj.value)
 			{
 				Class<?> objCl = obj.getClass();
-				AUtils.replaceFirst(merged, (i, current) ->
+				ArrayUtils.replaceFirst(merged, (i, current) ->
 				{
 					if (current == null)
 						return obj;
@@ -791,7 +800,7 @@ public class Script
 					return curCl.isAssignableFrom(objCl) || objCl.isAssignableFrom(curCl) ? obj : current;
 				});
 			}
-		return new SVJavObj(null, null, null, AUtils.trim(merged));
+		return new SVJavObj(null, null, null, ArrayUtils.trim(merged));
 	}).setVarArgs();
 	public static final Command GET_PARENT = add("get_parent", STRING, "Returns the name of the parent script # levels up, where 0 would target this script.", CmdArg.INT).setFunc((ctx, objs) ->
 	{
@@ -975,7 +984,7 @@ public class Script
 			out = out && b;
 		return boolOf(out);
 	}).setVarArgs();
-	public static final Command COMPARE = add("compare", BOOL, "Returns the evaluation of the boolean expression.", CmdArg.BOOLEAN_EXP).setFunc((ctx, objs) ->
+	public static final Command COMPARE = add("compare", BOOL, "Returns the evaluation of the boolean expression.", CmdArg.BOOLEAN_EXP_OBJ).setFunc((ctx, objs) ->
 	{
 		return boolOf(((BooleanExp) objs[0]).eval());
 	});
@@ -1597,12 +1606,12 @@ public class Script
 			
 			if (parse != TOK_S || QTRACK.inside() || (SYNTRACK.insideOne() && !PARTRACK.justEntered()))
 				tok += parse;
-			else if (!tok.isBlank())
+			else if (!tok.trim().isEmpty())
 			{
 				tokens.add(tok);
 				tok = "";
 			}
-			if (i == str.length() - 1 && !tok.isBlank())
+			if (i == str.length() - 1 && !tok.trim().isEmpty())
 				tokens.add(tok);
 		}
 		return tokens.toArray(new String[tokens.size()]);
@@ -1776,6 +1785,11 @@ public class Script
 		return tokensExt;
 	}
 	
+	public static void setScriptPath(String path)
+	{
+		SCRIPT_PATH = StringUtils.endWith(path, SEP);
+	}
+	
 	public static File getScriptFile(String unraw)
 	{
 		File scr = new File(SCRIPT_PATH + StringUtils.endWith(StringUtils.startWithout(unraw, HIDDEN_SCRIPT), SCRIPT_EXT));
@@ -1898,7 +1912,7 @@ public class Script
 	
 	public String getParseExceptString(String preAt, String postLine, String extra)
 	{
-		return preAt + " at line " + (parseLine + 1) + ": " + postLine + ", from: " + lines[parseLine]
+		return preAt + " at line " + (parseLine + 1) + ": " + postLine + ", from: " + scope.getLast().getLabel().name + "." + stack.peek().to.name + " | " + lines[parseLine]
 				+ (extra == null ? "." : ", extra info: " + extra);
 	}
 	

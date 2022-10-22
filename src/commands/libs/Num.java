@@ -1,6 +1,8 @@
 package commands.libs;
 
-public class Num extends Number
+import annotations.ScajlClone;
+
+public class Num extends Number implements ScajlClone<Num>
 {
 /**
 	 * 
@@ -92,5 +94,11 @@ public class Num extends Number
 	public String toString()
 	{
 		return Double.toString(val);
+	}
+
+	@Override
+	public Num sjClone()
+	{
+		return new Num(val);
 	}
 }

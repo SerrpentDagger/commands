@@ -9,6 +9,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.Map.Entry;
 
 import commands.BooleanExp.Comp;
 import commands.DoubleExp.Oper;
@@ -69,7 +70,7 @@ public abstract class CmdArg<T>
 		{
 			if (cls.isArray())
 			{
-				CmdArg<?> componentArg = getArgFor(cls.componentType());
+				CmdArg<?> componentArg = getArgFor(cls.getComponentType());
 				if (componentArg == null)
 					return null;
 				return (CmdArg<T>) arrayOf(componentArg);
@@ -218,7 +219,7 @@ public abstract class CmdArg<T>
 	
 	public static abstract class PrefCmdArg<T> extends CmdArg<T>
 	{
-		private final HashMap<String, CmdArg<T>> prefixes = new HashMap<>();
+		private final LinkedHashMap<String, CmdArg<T>> prefixes = new LinkedHashMap<>();
 		private int tokenCount = 0;
 		
 		public PrefCmdArg(String type, Class<T> cls)
@@ -234,6 +235,21 @@ public abstract class CmdArg<T>
 				throw new IllegalArgumentException("Added CmdArg must have matching tokenCount.");
 			prefixes.put(prefix.toUpperCase(), toAdd);
 			return this;
+		}
+		
+		@Override
+		public String getInfoString()
+		{
+			String inf = "";
+			Iterator<Entry<String, CmdArg<T>>> it = prefixes.entrySet().iterator();
+			while (it.hasNext())
+			{
+				Entry<String, CmdArg<T>> ent = it.next();
+				inf += Script.RAW + ent.getKey() + Script.RAW + " " + ent.getValue().getInfoString();
+				if (it.hasNext())
+					inf += " (or) ";
+			}
+			return inf;
 		}
 		
 		@Override
@@ -398,6 +414,21 @@ public abstract class CmdArg<T>
 			catch (NumberFormatException e)
 			{}
 			return null;
+		}
+	}.reg();
+	
+	public static final CmdArg<Integer> INT_EXP = new CmdArg<Integer>("Integer Operation Integer", Integer.class)
+	{
+		@Override
+		public int tokenCount()
+		{
+			return 3;
+		}
+		
+		@Override
+		public Integer parse(String trimmed, String[] tokens, Script ctx)
+		{
+			return Math.round(Math.round(DOUBLE_EXPRESSION.parse(trimmed, tokens, ctx)));
 		}
 	}.reg();
 	
@@ -651,7 +682,7 @@ public abstract class CmdArg<T>
 			}
 		}
 	}.reg();
-	
+		
 	public static final VarCmdArg<BooleanThen> BOOLEAN_THEN = new VarCmdArg<BooleanThen>("Boolean Then", BooleanThen.class)
 	{
 		@Override
@@ -670,7 +701,7 @@ public abstract class CmdArg<T>
 		}
 	}.reg();
 	
-	public static final CmdArg<BooleanExp> BOOLEAN_EXP = new CmdArg<BooleanExp>("Double Comparator Double", BooleanExp.class)
+	public static final CmdArg<BooleanExp> BOOLEAN_EXP_OBJ = new CmdArg<BooleanExp>("Double Comparator Double", BooleanExp.class)
 	{
 		@Override
 		public int tokenCount()
@@ -1131,7 +1162,7 @@ CmdArg.funcInterfaceOf(Pos3dVal.class, (matching) -> (pos) -> (double) matching.
 	
 	private static <X> VarCmdArg<X> arrayOfPrimitives(Class<X> primArray)
 	{
-		Class<?> prim = primArray.componentType();
+		Class<?> prim = primArray.getComponentType();
 		Class<?> wrapped = WRAP_PRIMITIVE.get(prim);
 		CmdArg<?> wrappedArg = getArgFor(wrapped);
 		@SuppressWarnings("unchecked")
