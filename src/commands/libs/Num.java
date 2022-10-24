@@ -1,12 +1,11 @@
 package commands.libs;
 
+import annotations.Desc;
 import annotations.ScajlClone;
 
+@Desc("A simple container for numbers that can be stored in Java objects like ArrayLists.")
 public class Num extends Number implements ScajlClone<Num>
 {
-/**
-	 * 
-	 */
 	private static final long serialVersionUID = 1L;
 	private double val;
 	public Num(double val)

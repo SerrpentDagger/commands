@@ -211,6 +211,19 @@ public class ScriptObject<T>
 	
 	public Command getMemberCmd(String name)
 	{
-		return memberCmds.get(name);
+		Command mem = memberCmds.get(name);
+		if (mem == null)
+		{
+			Class<?> sup = cmdArg.cls.getSuperclass();
+			while (sup != null)
+			{
+				ScriptObject<?> supSO = Script.getType(sup);
+				if (supSO != null)
+					return supSO.getMemberCmd(name);
+				else
+					sup = sup.getSuperclass();
+			}
+		}
+		return mem;
 	}
 }

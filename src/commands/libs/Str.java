@@ -1,8 +1,10 @@
 package commands.libs;
 
+import annotations.Desc;
 import annotations.ScajlClone;
 import utilities.StringUtils;
 
+@Desc("A simple container for Strings that can be stored in Java objects like ArrayLists.")
 public class Str implements ScajlClone<Str>
 {
 	public String val;

@@ -94,7 +94,7 @@ public class Command
 	{
 		String str = "";
 		for (int i = 0; i < args.length; i++)
-			str += args[i].getInfoString() + (i == args.length - 1 ? "" : ", ");
+			str += (nullableArg(i) ? "!" : "") + args[i].getInfoString() + (i == args.length - 1 ? "" : ", ");
 		
 		if (isVarArgs)
 			str += "...";

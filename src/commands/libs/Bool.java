@@ -1,7 +1,9 @@
 package commands.libs;
 
+import annotations.Desc;
 import annotations.ScajlClone;
 
+@Desc("A simple container for booleans that can be stored in Java objects like ArrayLists.")
 public class Bool implements ScajlClone<Bool>
 {
 	private boolean val = false;

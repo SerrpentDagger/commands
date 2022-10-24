@@ -18,10 +18,12 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Member;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
+import java.lang.reflect.Parameter;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -32,13 +34,18 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.IntPredicate;
+import java.util.function.Predicate;
 import java.util.regex.Pattern;
 
 import javax.swing.JFrame;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
 
+import annotations.Desc;
+import annotations.Expose;
 import annotations.NoExpose;
+import annotations.Nullable;
+import annotations.Reluctant;
 import commands.CmdArg.TypeArg;
 import commands.CmdArg.VarCmdArg;
 import commands.Command.CommandResult;
@@ -67,6 +74,7 @@ public class Script
 	private static final HashMap<String, ScriptObject<?>> OBJECTS = new HashMap<String, ScriptObject<?>>();
 	private static final HashMap<Class<?>, ScriptObject<?>> OBJECTS_BY_CLASS = new HashMap<>();
 	private static final HashMap<String, Library> LIBS = new HashMap<>();
+	private static final HashSet<Class<?>> NO_EXPOSE = new HashSet<>();
 	
 	public static final String COMMENT = "//";
 	public static final char COMMENT_CHAR = '/';
@@ -143,6 +151,7 @@ public class Script
 	private BiConsumer<String, String> prevCallback = (cmd, prv) -> {};
 	private Consumer<String> errorCallback = (err) -> printCallback.accept(err);
 	private BiConsumer<CommandParseException, String> parseExceptionCallback = (exc, err) -> { exc.printStackTrace(); };
+	private Runnable pollEvents = null;
 	private Debugger debugger = (cmd, args, ret) -> {};
 	private Debugger oldDebug = debugger;
 	private boolean printingDebug = false;
@@ -243,8 +252,10 @@ public class Script
 
 		String typeString = typeArg.arg.type;
 		
-		String gDesc = "Getter for the field '" + displayName + "'";
-		String sDesc = "Setter for the field '" + displayName + "'";
+		Desc descAnn = f.getAnnotation(Desc.class);
+		String postDesc = descAnn == null ? "" : ": " + descAnn.value();
+		String gDesc = "Getter for the field '" + displayName + "'" + postDesc;
+		String sDesc = "Setter for the field '" + displayName + "'" + postDesc;
 		
 		CmdArg<?>[] sArgs = new CmdArg<?>[] { typeArg.arg };
 		CmdArg<?>[] gArgs = new CmdArg<?>[] {};
@@ -292,6 +303,8 @@ public class Script
 				}
 				return ctx.prev();
 			});
+			if (f.isAnnotationPresent(Nullable.class))
+				out[1].nullable(0);
 		}
 		
 		return out;
@@ -345,9 +358,14 @@ public class Script
 		
 		String ret = retTypeArg.arg.type;
 		
-		String desc = "Direct exposition of method: " + displayName;
+		Desc descAnn = e.getAnnotation(Desc.class);
+		String desc = descAnn == null ? "Direct exposition of method: " + displayName : descAnn.value();
 		
 		Command cmd = to == null ? add(name, ret, desc, args) : to.add(name, ret, desc, args);
+		Parameter[] parameters = e.getParameters();
+		for (int i = 0; i < parameters.length; i++)
+			if (parameters[i].isAnnotationPresent(Nullable.class))
+				cmd.nullable(i);
 		if (varArgs)
 			cmd.setVarArgs();
 		cmd.setFunc((ctx, objs) ->
@@ -414,12 +432,17 @@ public class Script
 	{
 		int mods = cl.getModifiers();
 		return Modifier.isPublic(mods)
+				&& !NO_EXPOSE.contains(cl)
 				&& !cl.isAnonymousClass()
 				&& !cl.isLocalClass()
 				&& cl.getSuperclass() != null
 				&& cl != Class.class
-				&& cl.isAnnotationPresent(NoExpose.class);
+				&& !cl.isAnnotationPresent(NoExpose.class);
 	};
+	public static void noExpose(Class<?>... noExpose)
+	{
+		NO_EXPOSE.addAll(Arrays.asList(noExpose));
+	}
 	public static Command[] exposeMethodsByName(Class<?> from, ScriptObject<?> to, boolean recursive, String... names)
 	{
 		return exposeMethodsByName(from, to, SAFE_EXPOSE_FILTER, SAFE_CLASS_EXPOSE_FILTER, recursive, names);
@@ -480,6 +503,7 @@ public class Script
 	@SuppressWarnings("unchecked")
 	public static <T> ScriptObject<T> expose(Class<T> cl, ExpPredicate memberIf, ClsPredicate classIf, boolean recursive)
 	{
+		boolean reluctant = cl.isAnnotationPresent(Reluctant.class);
 		String desired = cl.getSimpleName();
 		String name = desired;
 		int i = 2;
@@ -491,7 +515,8 @@ public class Script
 			name = desired + i++;
 		}
 		
-		String desc = "Direct exposition of class: " + cl.getCanonicalName();
+		Desc descAnn = cl.getAnnotation(Desc.class);
+		String desc = descAnn == null ? "Direct exposition of class: " + cl.getCanonicalName() : descAnn.value();
 		
 		ScriptObject<T> so = new ScriptObject<>(name, desc, cl);
 		Script.add(so);
@@ -510,9 +535,19 @@ public class Script
 			}
 		}
 		
-		Script.exposeAll(cl.getConstructors(), so, memberIf, classIf, recursive);
-		Script.exposeAll(cl.getMethods(), so, memberIf, classIf, recursive);
-		Script.exposeAll(cl.getFields(), so, memberIf, classIf, recursive);
+		Constructor<?>[] consts = cl.getDeclaredConstructors();
+		Method[] meths = cl.getDeclaredMethods();
+		Field[] fields = cl.getDeclaredFields();
+		Predicate<AccessibleObject> ifNotExpose = (obj) -> !obj.isAnnotationPresent(Expose.class);
+		if (reluctant)
+		{
+			consts = (Constructor<?>[]) ArrayUtils.removeIf(consts, ifNotExpose);
+			meths = (Method[]) ArrayUtils.removeIf(meths, ifNotExpose);
+			fields = (Field[]) ArrayUtils.removeIf(fields, ifNotExpose);
+		}
+		Script.exposeAll(consts, so, memberIf, classIf, recursive);
+		Script.exposeAll(meths, so, memberIf, classIf, recursive);
+		Script.exposeAll(fields, so, memberIf, classIf, recursive);
 
 		return so;
 	}
@@ -534,9 +569,9 @@ public class Script
 		return so;
 	}
 	
-	public static Library add(String name, Runnable load)
+	public static Library add(String name, Runnable load, Library... dependancies)
 	{
-		Library lib = new Library(name, load);
+		Library lib = new Library(name, load, dependancies);
 		LIBS.put(name, lib);
 		return lib;
 	}
@@ -924,21 +959,21 @@ public class Script
 	}).setVarArgs();
 	public static final Command ADD = add("add", DOUBLE, "Adds and returns the argument numbers.", CmdArg.DOUBLE).setFunc((ctx, objs) ->
 	{
-		return numOf(operate(0, (Object[]) objs[0], (all, next) -> all + next));
+		return numOf(operate((Object[]) objs[0], (all, next) -> all + next));
 	}).setVarArgs();
 	public static final Command SUB = add("sub", DOUBLE, "Subtracts and returns the argument numbers.", CmdArg.DOUBLE).setFunc((ctx, objs) ->
 	{
 		Object[] arr = (Object[]) objs[0];
-		return numOf(operate((double) arr[0] * 2, arr, (all, next) -> all - next));
+		return numOf(operate(arr, (all, next) -> all - next));
 	}).setVarArgs();
 	public static final Command MULT = add("mult", DOUBLE, "Multiplies and returns the argument numbers.", CmdArg.DOUBLE).setFunc((ctx, objs) ->
 	{
-		return numOf(operate(1, (Object[]) objs[0], (all, next) -> all * next));
+		return numOf(operate((Object[]) objs[0], (all, next) -> all * next));
 	}).setVarArgs();
 	public static final Command DIVI = add("divi", DOUBLE, "Divides and returns the argument numbers.", CmdArg.DOUBLE).setFunc((ctx, objs) ->
 	{
 		Object[] arr = (Object[]) objs[0];
-		return numOf(operate((double) arr[0] * (double) arr[0], arr, (all, next) -> all / next));
+		return numOf(operate(arr, (all, next) -> all / next));
 	}).setVarArgs();
 	public static final Command MODULO = add("mod", DOUBLE, "Returns A % B.", CmdArg.DOUBLE, CmdArg.DOUBLE).setFunc((ctx, objs) ->
 	{
@@ -963,6 +998,10 @@ public class Script
 	public static final Command NEGATE = add("negate", DOUBLE, "Returns the negation of the argument number.", CmdArg.DOUBLE).setFunc((ctx, objs) ->
 	{
 		return numOf((-(double) objs[0]));
+	});
+	public static final Command TO_INT = add("int", DOUBLE, "Rounds to the nearest int, and removes decimal in string.", CmdArg.INT).setFunc((ctx, objs) ->
+	{
+		return valOf("" + (int) objs[0]);
 	});
 	public static final Command NOT = add("not", BOOL, "Return the boolean inverse of the argument.", CmdArg.BOOLEAN).setFunc((ctx, objs) ->
 	{
@@ -1269,11 +1308,11 @@ public class Script
 		public void key(int key, Script ctx, Object[] objs);
 	}
 	
-	private static double operate(double start, Object[] numArray, Operator op)
+	private static double operate(Object[] numArray, Operator op)
 	{
-		double all = start;
-		for (Object doub : numArray)
-			all = op.operate(all, (double) doub);
+		double all = (double) numArray[0];
+		for (int i = 1; i < numArray.length; i++)
+			all = op.operate(all, (double) numArray[i]);
 		return all;
 	}
 	@FunctionalInterface
@@ -2126,6 +2165,8 @@ public class Script
 		Bool breakIf = new Bool(false);
 		while(parseLine < lines.length && !stack.isEmpty() && !forceKill.get())
 		{
+			if (pollEvents != null)
+				pollEvents.run();
 			String line = lines[parseLine];
 			if (!line.isEmpty())
 			{
@@ -2374,6 +2415,11 @@ public class Script
 	public void setParseExceptionCallback(BiConsumer<CommandParseException, String> callback)
 	{
 		this.parseExceptionCallback = callback;
+	}
+	
+	public void setPollEvents(Runnable poll)
+	{
+		this.pollEvents = poll;
 	}
 	
 	public void setUserReqestType(UserReqType reqType)

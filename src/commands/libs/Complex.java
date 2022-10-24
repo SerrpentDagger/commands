@@ -1,7 +1,8 @@
 package commands.libs;
 
+import annotations.Desc;
 import annotations.ScajlClone;
-
+@Desc("A utility class to provide functionality for complex numbers.")
 public class Complex implements ScajlClone<Complex>
 {
 	private double a, b;
@@ -113,11 +114,13 @@ public class Complex implements ScajlClone<Complex>
 	
 	/////////////////////////
 	
+	@Desc("Create a new Complex with the given real and imaginary components.")
 	public static Complex ofABi(double a, double b)
 	{
 		return new Complex(a, b);
 	}
 	
+	@Desc("Create a new Complex with the given magnitude and argument.")
 	public static Complex ofRTheta(double r, double theta)
 	{
 		return new Complex(r * Math.cos(theta), r * Math.sin(theta));
