@@ -10,6 +10,7 @@ import java.awt.event.MouseEvent;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.lang.reflect.AccessibleObject;
+import java.lang.reflect.AnnotatedElement;
 import java.lang.reflect.Array;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Executable;
@@ -43,6 +44,7 @@ import javax.swing.JTextField;
 
 import annotations.Desc;
 import annotations.Expose;
+import annotations.Name;
 import annotations.NoExpose;
 import annotations.Nullable;
 import annotations.Reluctant;
@@ -225,7 +227,8 @@ public class Script
 	}
 	private static Command[] exposeGetterSetterFor(Field f, ScriptObject<?> to, ExpPredicate filter, ClsPredicate clFilter, boolean recursive)
 	{
-		String fieldName = f.getName();
+		Name nameAn = f.getAnnotation(Name.class);
+		String fieldName = nameAn == null ? f.getName() : nameAn.value();
 		String displayName = f.getDeclaringClass().getCanonicalName() + "." + fieldName;
 		
 		int mods = f.getModifiers();
@@ -318,7 +321,8 @@ public class Script
 		final Constructor<?> c = isM ? null : (Constructor<?>) e;
 		
 		HashMap<String, Command> map = to == null ? CMDS : to.getMemberCommandMap();
-		String name = uniqueName(isM ? e.getName() : "new", map);
+		Name nameAn = e.getAnnotation(Name.class);
+		String name = uniqueName(nameAn == null ? isM ? e.getName() : "new" : nameAn.value(), map);
 
 		Class<?>[] types = e.getParameterTypes();
 		for (int i = 0; i < types.length; i++)
@@ -504,7 +508,8 @@ public class Script
 	public static <T> ScriptObject<T> expose(Class<T> cl, ExpPredicate memberIf, ClsPredicate classIf, boolean recursive)
 	{
 		boolean reluctant = cl.isAnnotationPresent(Reluctant.class);
-		String desired = cl.getSimpleName();
+		Name nameAn = cl.getAnnotation(Name.class);
+		String desired = nameAn == null ? cl.getSimpleName() : nameAn.value();
 		String name = desired;
 		int i = 2;
 		while (OBJECTS.containsKey(name))
@@ -521,11 +526,15 @@ public class Script
 		ScriptObject<T> so = new ScriptObject<>(name, desc, cl);
 		Script.add(so);
 		so.argOf().reg();
+		Predicate<AnnotatedElement> ifNotExpose = (obj) -> !obj.isAnnotationPresent(Expose.class);
 		if (recursive)
 		{
 			ScriptObject<?> sub = so;
 			Class<?> subCl = cl;
-			exposeAll(subCl.getClasses(), classIf, memberIf, recursive);
+			Class<?>[] subs = subCl.getClasses();
+			if (reluctant)
+				subs = (Class<?>[]) ArrayUtils.removeIf(subs, ifNotExpose);
+			exposeAll(subs, classIf, memberIf, recursive);
 			exposeAll(subCl.getInterfaces(), classIf, memberIf, recursive);
 			Class<?> sup = cl.getSuperclass();
 			if (sup != null && (sup == Object.class || classIf.test(sup, recursive)))
@@ -538,7 +547,6 @@ public class Script
 		Constructor<?>[] consts = cl.getDeclaredConstructors();
 		Method[] meths = cl.getDeclaredMethods();
 		Field[] fields = cl.getDeclaredFields();
-		Predicate<AccessibleObject> ifNotExpose = (obj) -> !obj.isAnnotationPresent(Expose.class);
 		if (reluctant)
 		{
 			consts = (Constructor<?>[]) ArrayUtils.removeIf(consts, ifNotExpose);

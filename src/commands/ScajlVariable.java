@@ -129,11 +129,14 @@ public abstract class ScajlVariable
 		{
 			boolean t = other instanceof SVVal && other != NULL;
 			if (!t)
-				return t;
+				return false;
+			Boolean b = CmdArg.BOOLEAN.parse(modless);
+			if (b != null)
+				return CmdArg.BOOLEAN.parse(((SVVal) other).modless) != null;
 			Double d = CmdArg.DOUBLE.parse(modless);
-			if (d == null)
-				return t;
-			return CmdArg.DOUBLE.parse(((SVVal) other).modless) != null;
+			if (d != null)
+				return CmdArg.DOUBLE.parse(((SVVal) other).modless) != null;
+			return true;
 		}
 		
 		@Override

@@ -1,5 +1,7 @@
 package commands;
 
+import utilities.StringUtils;
+
 public class Library
 {
 	public final Runnable load;
@@ -32,6 +34,6 @@ public class Library
 	
 	public String getInfoString()
 	{
-		return name + " | Loaded: " + loaded;
+		return name + StringUtils.toString(dependancies, (d) -> d.name, "(", ", ", ")") + " | Loaded: " + loaded;
 	}
 }

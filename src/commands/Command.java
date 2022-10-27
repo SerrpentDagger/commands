@@ -14,6 +14,8 @@ public class Command
 	
 	protected Command(String name, String ret, String desc, CmdArg<?>... args)
 	{
+		if (name.split("\\s").length != 1)
+			throw new IllegalArgumentException("Command names must not include white space: '" + name + "'");
 		this.name = name;
 		this.args = args;
 		this.ret = ret;
