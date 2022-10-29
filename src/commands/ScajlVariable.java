@@ -36,6 +36,8 @@ public abstract class ScajlVariable
 	public abstract String val(Script ctx);
 	public abstract ScajlVariable eval(Script ctx);
 	public abstract String raw();
+	@Override
+	public abstract boolean equals(Object other);
 	public VarCtx varCtx(String[] memberAccess, int off, boolean put, Script ctx)
 	{
 		if (off < memberAccess.length)
@@ -127,15 +129,24 @@ public abstract class ScajlVariable
 		@Override
 		public boolean test(ScajlVariable other, Script ctx)
 		{
+			if (modless.equals("null"))
+				if (other instanceof SVVal)
+				{
+					SVVal oth = (SVVal) other;
+					return other.equals(NULL) || CmdArg.BOOLEAN.parse(oth.modless) != null || CmdArg.DOUBLE.parse(oth.modless) != null;
+				}
+				else
+					return true;
 			boolean t = other instanceof SVVal && other != NULL;
 			if (!t)
 				return false;
+			SVVal oth = (SVVal) other;
 			Boolean b = CmdArg.BOOLEAN.parse(modless);
 			if (b != null)
-				return CmdArg.BOOLEAN.parse(((SVVal) other).modless) != null;
+				return CmdArg.BOOLEAN.parse(oth.modless) != null;
 			Double d = CmdArg.DOUBLE.parse(modless);
 			if (d != null)
-				return CmdArg.DOUBLE.parse(((SVVal) other).modless) != null;
+				return CmdArg.DOUBLE.parse(oth.modless) != null;
 			return true;
 		}
 		
@@ -149,6 +160,14 @@ public abstract class ScajlVariable
 		public SVVal clone()
 		{
 			return new SVVal(input, modless, selfCtx.get());
+		}
+		
+		@Override
+		public boolean equals(Object other)
+		{
+			if (!(other instanceof SVVal))
+				return false;
+			return ((SVVal) other).modless.equals(modless);
 		}
 	}
 	
@@ -194,6 +213,14 @@ public abstract class ScajlVariable
 		public SVRef clone()
 		{
 			return new SVRef(input, modless);
+		}
+		
+		@Override
+		public boolean equals(Object other)
+		{
+			if (!(other instanceof SVRef))
+				return false;
+			return ((SVRef) other).modless.equals(modless);
 		}
 	}
 	
@@ -241,6 +268,16 @@ public abstract class ScajlVariable
 		public SVString clone()
 		{
 			return new SVString(input, modless, selfCtx.get());
+		}
+		
+		@Override
+		public boolean equals(Object other)
+		{
+			if (other instanceof SVVal)
+				return ((SVVal) other).modless.equals(unraw);
+			if (!(other instanceof SVString))
+				return false;
+			return ((SVString) other).unraw.equals(unraw);
 		}
 	}
 	
@@ -352,6 +389,24 @@ public abstract class ScajlVariable
 			for (int i = 0; i < newVal.length; i++)
 				newVal[i] = ScajlClone.tryClone(newVal[i]);
 			return new SVJavObj(input, modless, selfCtx.get(), newVal);
+		}
+		
+		@Override
+		public boolean equals(Object other)
+		{
+			if (!(other instanceof SVJavObj))
+				return false;
+			SVJavObj oth = (SVJavObj) other;
+			if (oth.value.length != value.length)
+				return false;
+			for (Object val : value)
+			{
+				Class<?> cl = val.getClass();
+				for (Object oVal : oth.value)
+					if (cl.isAssignableFrom(oVal.getClass()) && !val.equals(oVal))
+						return false;
+			}
+			return true;
 		}
 	}
 	
@@ -522,6 +577,24 @@ public abstract class ScajlVariable
 			}
 		}
 		
+		@Override
+		public boolean equals(Object other)
+		{
+			if (!(other instanceof SVMap))
+				return false;
+			SVMap oth = (SVMap) other;
+			if (oth.map.size() != map.size())
+				return false;
+			Iterator<Entry<String, ScajlVariable>> it = map.entrySet().iterator();
+			while (it.hasNext())
+			{
+				Entry<String, ScajlVariable> ent = it.next();
+				if (!ent.getValue().equals(oth.map.get(ent.getKey())))
+					return false;
+			}
+			return true;
+		}
+		
 		public LinkedHashMap<String, ScajlVariable> getMap()
 		{
 			return map;
@@ -602,6 +675,20 @@ public abstract class ScajlVariable
 		public ScajlVariable[] getArray()
 		{
 			return array;
+		}
+		
+		@Override
+		public boolean equals(Object other)
+		{
+			if (!(other instanceof SVTokGroup))
+				return false;
+			SVTokGroup oth = (SVTokGroup) other;
+			if (oth.array.length != array.length)
+				return false;
+			for (int i = 0; i < array.length; i++)
+				if (!array[i].equals(oth.array[i]))
+					return false;
+			return true;
 		}
 	}
 	
@@ -732,6 +819,20 @@ public abstract class ScajlVariable
 			return clone;
 		}
 		
+		@Override
+		public boolean equals(Object other)
+		{
+			if (!(other instanceof SVArray))
+				return false;
+			SVArray oth = (SVArray) other;
+			if (oth.array.length != array.length || oth.noUnpack != noUnpack)
+				return false;
+			for (int i = 0; i < array.length; i++)
+				if (!array[i].equals(oth.array[i]))
+					return false;
+			return true;
+		}
+		
 		public ScajlVariable[] getArray()
 		{
 			return array;
@@ -779,6 +880,14 @@ public abstract class ScajlVariable
 		public SVExec clone()
 		{
 			return new SVExec(input, modless, selfCtx.get());
+		}
+		
+		@Override
+		public boolean equals(Object other)
+		{
+			if (!(other instanceof SVExec))
+				return false;
+			return ((SVExec) other).modless.equals(modless);
 		}
 	}
 	

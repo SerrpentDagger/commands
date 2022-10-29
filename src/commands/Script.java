@@ -777,6 +777,25 @@ public class Script
 				ctx.parseExcept("Illegal variable value", "Variable named '" + pat.name + "', with value '" + pat.var.raw() + "' does not match the required Pattern defined by the default '" + pat.pattern.raw() + "'");
 		return ctx.prev();
 	}).setVarArgs();
+	public static final Command EQUALS = add("equals", BOOL, "Checks whether or not all the inputs are 'equal'.", CmdArg.SCAJL_VARIABLE).setFunc((ctx, objs) ->
+	{
+		ScajlVariable[] vars = (ScajlVariable[]) objs[0];
+		if (vars.length < 2)
+			return TRUE;
+		ScajlVariable first = vars[0];
+		for (int i = 1; i < vars.length; i++)
+			if (!first.equals(vars[i]))
+				return FALSE;
+		return TRUE;
+	}).setVarArgs();
+	public static final Command NEQUALS = add("nequals", BOOL, "Checks whether or not none the inputs are 'equal'.", CmdArg.SCAJL_VARIABLE).setFunc((ctx, objs) ->
+	{
+		ScajlVariable[] vars = (ScajlVariable[]) objs[0];
+		if (vars.length < 2)
+			return FALSE;
+		
+		return boolOf(!ArrayUtils.forCombos(vars, 2, (pair) -> pair[0].equals(pair[1])));
+	}).setVarArgs();
 	public static final Command IS_VAR = add("is_var", BOOL, "Checks whether or not the token is a variable.", CmdArg.TOKEN).setFunc((ctx, objs) ->
 	{
 		String[] vars = (String[]) objs[0];
@@ -1737,7 +1756,21 @@ public class Script
 	private static String unpack(String toUnp, char start, char end)
 	{
 		if (startsWith(toUnp, start) && endsWith(toUnp, end))
+		{
+			int deep = 0;
+			for (int i = 0; i < toUnp.length(); i++)
+			{
+				if (toUnp.charAt(i) == start)
+					deep++;
+				else if (toUnp.charAt(i) == end)
+				{
+					deep--;
+					if (deep == 0 && i != toUnp.length() - 1)
+						return toUnp;
+				}
+			}
 			return toUnp.substring(1, toUnp.length() - 1);
+		}
 		return toUnp;
 	}
 	
@@ -2506,6 +2539,7 @@ public class Script
 		to.setPrevCallback(getPrevCallback());
 		to.setForceKill(forceKill);
 		to.setUserReqestType(getUserReqType());
+		to.setPollEvents(pollEvents);
 		to.keyIn = keyIn;
 	}
 	
