@@ -10,6 +10,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map.Entry;
+import java.util.function.IntPredicate;
 
 import commands.BooleanExp.Comp;
 import commands.DoubleExp.Oper;
@@ -416,6 +417,18 @@ public abstract class CmdArg<T>
 			return null;
 		}
 	}.reg();
+	
+	public static final CmdArg<Integer> INT_POSITIVE = new CmdArg<Integer>("PositiveInteger", Integer.class)
+	{
+		@Override
+		public Integer parse(String trimmed, String[] tokens, Script ctx)
+		{
+			Integer i = INT.parse(trimmed, tokens, ctx);
+			if (i != null && i >= 0)
+				return i;
+			return null;
+		}
+	};
 	
 	public static final CmdArg<Integer> INT_EXP = new CmdArg<Integer>("Integer Operation Integer", Integer.class)
 	{
@@ -848,6 +861,90 @@ public abstract class CmdArg<T>
 			return new IntVarSet(i, v, s);
 		}
 	}.reg();
+	
+	public static CmdArg<Object[]> combine(CmdArg<?>... args)
+	{
+		boolean varCmdArg = false;
+		String name = "";
+		int count = args.length;
+		
+		for (CmdArg<?> arg : args)
+		{
+			if (arg instanceof VarCmdArg)
+				varCmdArg = true;
+			name += arg.type + " ";
+		}
+		name = name.substring(0, name.length() - 1);
+		IntPredicate rawToken = (ind) ->
+		{
+			for (int i = 0; i < args.length; i++)
+			{
+				if (ind < args[i].tokenCount())
+					return args[i].rawToken(ind);
+				ind -= args[i].tokenCount();
+			}
+			return false;
+
+		};
+		if (!varCmdArg)
+			return new CmdArg<Object[]>(name, Object[].class)
+					{
+						@Override
+						public boolean rawToken(int ind)
+						{
+							return rawToken.test(ind);
+						}
+						
+						@Override
+						public int tokenCount()
+						{
+							return count;
+						}
+						
+						@Override
+						public Object[] parse(String trimmed, String[] tokens, Script ctx)
+						{
+							Object[] out = new Object[count];
+							for (int i = 0; i < count;)
+							{
+								out[i] = args[i].parse(tokens, i, ctx);
+								i += args[i].tokenCount();
+							}
+							if (ArrayUtils.contains(out, null))
+								return null;
+							return out;
+						}
+					};
+		else
+			return new VarCmdArg<Object[]>(name, Object[].class)
+					{
+						@Override
+						public boolean rawToken(int ind)
+						{
+							return rawToken.test(ind);
+						}
+						
+						@Override
+						public int tokenCount()
+						{
+							return count;
+						}
+				
+						@Override
+						public Object[] parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
+						{
+							Object[] out = new Object[count];
+							for (int i = off; i < count;)
+							{
+								out[i - off] = args[i - off].parse(tokens, vars, off + i, ctx);
+								i += args[i - off].tokenCount();
+							}
+							if (ArrayUtils.contains(out, null))
+								return null;
+							return out;
+						}
+					};
+	}
 
 	public static final VarCmdArg<IntVarSet> VAR_INT_SET = new VarCmdArg<IntVarSet>("VarName Integer Value", IntVarSet.class)
 	{

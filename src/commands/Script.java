@@ -83,6 +83,8 @@ public class Script
 	public static final String MULTILINE_COMMENT_START = "<<", MULTILINE_COMMENT_END = ">>";
 	public static final char LINE_MERGE = '+';
 	
+	public static final String SELF_REF = "SREF";
+	
 	public static final String LABEL = "--", SCOPED_LABEL = "~~";
 	public static final String LABEL_REG = LABEL + "|" + SCOPED_LABEL;
 	public static final String LABEL_ACC_FOR_DOWN = "|", LABEL_ACC_TO_UP = "^";
@@ -103,7 +105,7 @@ public class Script
 	public static final char ARR_S = '[', ARR_E = ']', ARR_ACCESS = '.', ARR_SEP = ';';
 	public static final char TOK_S = '(', TOK_E = ')', SCOPE_S = '{', SCOPE_E = '}';
 	public static final char MAP_KEY_EQ = '=';
-	public static final String ARR_LEN = "len", ARR_SELF = "up";
+	public static final String ARR_LEN = "len", ARR_SELF = "up", ARR_DIMS = "dims";
 	public static final char STRING_CHAR = '"';
 	public static final char ESCAPE_CHAR = '\\';
 	public static final char HELP_CHAR = '?';
@@ -1126,6 +1128,31 @@ public class Script
 			return arrOf(rets);
 	}).setVarArgs();
 	public static final Command ECH = overload("~", ECHO, "Just a shorter name.", (objs) -> objs, ECHO.args).setVarArgs();
+	public static final Command PACK = add("pack", VOID, "If the dimensions of the given array is less than the given, returns a new array packed to the given dimensions. Otherwise returns the given array.", CmdArg.combine(CmdArg.SCAJL_VARIABLE, CmdArg.INT_POSITIVE)).setFunc((ctx, objs) ->
+	{
+		Object[][] varInts = (Object[][]) objs[0];
+		ScajlVariable[] outA = new ScajlVariable[varInts.length];
+		for (int i = 0; i < varInts.length; i++)
+		{
+			Object[] varInt = varInts[i];
+			ScajlVariable in = (ScajlVariable) varInt[0];
+			int dims = (int) varInt[1];
+			ScajlVariable out;
+			out =  in;
+			if (dims >= 1)
+			{
+				if (!(out instanceof SVArray))
+					out = new SVArray(new ScajlVariable[] { in }, null);
+				out = ((SVArray) out).packTo(dims);
+			}
+			outA[i] = out;
+		}
+		if (outA.length == 0)
+			return ctx.prev();
+		else if (outA.length == 1)
+			return outA[0];
+		return Script.arrOf(outA);
+	}).setVarArgs();
 	public static final Command RUN_SCRIPT = add("run_script", Script.VOID, "Runs the given script. Booleans determine whether variables in this script will be given to other before being run, and whether variables in other will be pulled to this script once finished.", CmdArg.STRING, CmdArg.BOOLEAN, CmdArg.BOOLEAN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
 	{
 		String name = (String) objs[0];
@@ -1421,15 +1448,15 @@ public class Script
 		return OBJECTS.containsKey(token);
 	}
 	
-	private static final DelimTracker QTRACK = new DelimTracker(STRING_CHAR, ESCAPE_CHAR);
-	private static final BoxTracker
+	protected static final DelimTracker QTRACK = new DelimTracker(STRING_CHAR, ESCAPE_CHAR);
+	protected static final BoxTracker
 			ARRTRACK = new BoxTracker(ARR_S, ARR_E, ESCAPE_CHAR),
 			PARTRACK = new BoxTracker(TOK_S, TOK_E, ESCAPE_CHAR),
 			CURLTRACK = new BoxTracker(SCOPE_S, SCOPE_E, ESCAPE_CHAR);
-	private static final WrapTracker MCOMTRACK = new WrapTracker(MULTILINE_COMMENT_START, MULTILINE_COMMENT_END, ESCAPE_CHAR);
-	private static final RepeatTracker LCOMTRACK = new RepeatTracker(COMMENT_CHAR, ESCAPE_CHAR, 2);
-	private static final MultiTracker COMTRACK = new MultiTracker(MCOMTRACK, LCOMTRACK);
-	private static final MultiTracker SYNTRACK = new MultiTracker(ARRTRACK, CURLTRACK, PARTRACK);
+	protected static final WrapTracker MCOMTRACK = new WrapTracker(MULTILINE_COMMENT_START, MULTILINE_COMMENT_END, ESCAPE_CHAR);
+	protected static final RepeatTracker LCOMTRACK = new RepeatTracker(COMMENT_CHAR, ESCAPE_CHAR, 2);
+	protected static final MultiTracker COMTRACK = new MultiTracker(MCOMTRACK, LCOMTRACK);
+	protected static final MultiTracker SYNTRACK = new MultiTracker(ARRTRACK, CURLTRACK, PARTRACK);
 	
 	private static boolean multilineComment = false;
 	private static String stripComments(String line)
