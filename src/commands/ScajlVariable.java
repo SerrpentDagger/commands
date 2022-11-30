@@ -918,12 +918,15 @@ public abstract class ScajlVariable
 				Integer ind = CmdArg.INT.parse(accVal);
 				if (ind == null)
 					ctx.parseExcept("Invalid Array index: " + accVal, "Array indices must be numbers.", "From access: " + StringUtils.toString(memberAccess, "", "" + Script.ARR_ACCESS, ""));
-				if (ind >= array.length)
+				if (ind < 0)
+					ind = array.length + ind;
+				if (ind >= array.length || ind < 0)
 					ctx.parseExcept("Invalid Array index: " + ind, "Index out of bounds.", "From access: " + StringUtils.toString(memberAccess, "", "" + Script.ARR_ACCESS, ""));
+				final int iind = ind;
 				if (off == memberAccess.length - 1)
-					return new VarCtx(() -> array[ind], (var) ->
+					return new VarCtx(() -> array[iind], (var) ->
 					{
-						array[ind] = var;
+						array[iind] = var;
 						var.selfCtx = new WeakReference<>(this);
 					});
 				return array[ind].varCtx(memberAccess, off + 1, put, ctx);
