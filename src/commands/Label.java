@@ -1,5 +1,8 @@
 package commands;
 
+import java.lang.ref.WeakReference;
+import java.util.HashMap;
+import java.util.Iterator;
 import java.util.regex.Matcher;
 
 import mod.serpentdagger.artificialartificing.utils.group.MixedPair;
@@ -30,5 +33,95 @@ public class Label
 		this.isScoped = scoped;
 		this.isAccessible = accessible;
 		this.getsAccess = getsAccess;
+	}
+	
+	@Override
+	public String toString()
+	{
+		return name + ":" + line;
+	}
+	
+	//////////////////////
+	
+	public static class LabelTree
+	{
+		private final HashMap<String, LabelTree> subs = new HashMap<String, LabelTree>(7);
+		private final WeakReference<LabelTree> parent;
+		public final Label root;
+		private LabelTree growing = null;
+		private boolean done = false;
+		
+		private LabelTree(Label root, LabelTree parent)
+		{
+			this.root = root;
+			this.parent = new WeakReference<>(parent);
+		}
+		
+		public LabelTree(Label root)
+		{
+			this(root, null);
+		}
+		
+		public LabelTree open(Label into)
+		{
+			if (done)
+				throw new IllegalStateException("Cannot re-open a closed LabelTree.");
+			if (growing == null)
+				growing = new LabelTree(into, this);
+			else
+				growing.open(into);
+			return this;
+		}
+		
+		public LabelTree close()
+		{
+			if (done)
+				throw new IllegalStateException("This Label tree is already closed.");
+			if (growing == null)
+				done = true;
+			else
+			{
+				growing.close();
+				if (growing.done)
+				{
+					subs.put(growing.root.name, growing);
+					growing = null;
+				}
+			}
+			return this;
+		}
+		
+		public boolean contains(Label label)
+		{
+			return subs.containsKey(label.name);
+		}
+		
+		public LabelTree getFor(Label label)
+		{
+			LabelTree parent = this;
+			while (parent != null)
+			{
+				LabelTree got = parent.subs.get(label.name);
+				if (got != null)
+					return got;
+				parent = parent.parent.get();
+			}
+			return null;
+		}
+		
+		public boolean accessibleHere(Label label)
+		{
+			return getFor(label) != null;
+		}
+		
+		@Override
+		public String toString()
+		{
+			String str = root + "{";
+			Iterator<LabelTree> subIt = subs.values().iterator();
+			while (subIt.hasNext())
+				str += subIt.next().toString();
+			return str + (done ? "}" : (growing != null ? growing.toString() : "") + " --");
+		}
 	}
 }

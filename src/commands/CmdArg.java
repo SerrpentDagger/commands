@@ -586,6 +586,21 @@ public abstract class CmdArg<T>
 		}
 	}.reg();
 	
+	public static final VarCmdArg<ScajlVariable> PATTERN = new VarCmdArg<ScajlVariable>("Pattern", ScajlVariable.class)
+	{
+		@Override
+		public ScajlVariable parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
+		{
+			return SCAJL_VARIABLE.parse(tokens, vars, off, ctx);
+		}
+		
+		@Override
+		public ScajlVariable unparse(ScajlVariable obj)
+		{
+			return SCAJL_VARIABLE.unparse(obj);
+		}
+	};
+	
 	public static final VarCmdArg<SVArray> SVARRAY = new VarCmdArg<SVArray>("Array", SVArray.class)
 	{
 		@Override
@@ -755,7 +770,7 @@ public abstract class CmdArg<T>
 		}
 	};
 	
-	public static final VarCmdArg<VarPattern> VAR_PATTERN = new VarCmdArg<VarPattern>("Variable Pattern", VarPattern.class)
+	public static final VarCmdArg<Variable> VARIABLE = new VarCmdArg<Variable>("Variable", Variable.class)
 	{
 		@Override
 		public boolean rawToken(int ind)
@@ -764,18 +779,17 @@ public abstract class CmdArg<T>
 		}
 		
 		@Override
-		public int tokenCount()
-		{
-			return 2;
-		}
-		
-		@Override
-		public VarPattern parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
+		public Variable parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
 		{
 			ScajlVariable var = ctx.getVar(tokens[off], false, null);
-			return new VarPattern(var, vars[off + 1], tokens[off]);
+			Variable out = new Variable(var, tokens[off]);
+			if (out.name == null)
+				return null;
+			return out;
 		}
 	}.reg();
+	
+	public static final VarCmdArg<Object[]> VAR_PATTERN = (VarCmdArg<Object[]>) CmdArg.combine(VARIABLE, PATTERN);
 	
 	public static final VarCmdArg<VarSet> VAR_SET = new VarCmdArg<VarSet>("VarName Value", VarSet.class)
 	{

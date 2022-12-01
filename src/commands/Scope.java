@@ -5,6 +5,8 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import commands.Label.LabelTree;
+
 public class Scope
 {
 	private final ArrayList<SNode> stack = new ArrayList<>();
@@ -13,9 +15,9 @@ public class Scope
 	
 	///////////////////////
 	
-	public Scope()
+	public Scope(LabelTree root)
 	{
-		stack.add(new SNode(null, Script.GLOBAL));
+		stack.add(new SNode(null, root));
 		last = stack.get(0);
 		global = last;
 	}
@@ -29,7 +31,7 @@ public class Scope
 		{
 			sNode.vars.forEach((k, v) ->
 			{
-				sc.accept(level.get(), sNode.label, k, v);
+				sc.accept(level.get(), sNode.label.root, k, v);
 			});
 			level.incrementAndGet();
 		});
@@ -70,7 +72,7 @@ public class Scope
 		return last.get(name);
 	}
 	
-	public void push(Label to)
+	public void push(LabelTree to)
 	{
 		stack.add(last = new SNode(last, to));
 	}
@@ -93,15 +95,24 @@ public class Scope
 		return global;
 	}
 	
+	@Override
+	public String toString()
+	{
+		String str = "";
+		for (int i = 0; i < stack.size(); i++)
+			str += stack.get(i).label + (i != stack.size() - 1 ? "." : "");
+		return str;
+	}
+	
 	/////////////////////////////////////////////
 	
 	protected class SNode
 	{
 		private final HashMap<String, ScajlVariable> vars = new HashMap<>();
 		private final SNode parent;
-		private final Label label;
+		private final LabelTree label;
 		
-		private SNode(SNode parent, Label label)
+		private SNode(SNode parent, LabelTree label)
 		{
 			this.parent = parent;
 			this.label = label;
@@ -113,11 +124,11 @@ public class Scope
 			boolean contains = false, couldAccessOld = true;
 			while (!contains && sn != null)
 			{
-				contains = (sn == this || sn.label.isAccessible || (couldAccessOld && old.label.getsAccess)) && sn.vars.containsKey(name);
+				contains = (sn == this || sn.label.root.isAccessible || (couldAccessOld && old.label.root.getsAccess)) && sn.vars.containsKey(name);
 				if (!contains)
 				{
 					old = sn;
-					couldAccessOld = couldAccessOld || old.label.isAccessible;
+					couldAccessOld = couldAccessOld || old.label.root.isAccessible;
 					sn = sn.parent;
 				}
 				else
@@ -138,6 +149,11 @@ public class Scope
 		}
 		
 		public Label getLabel()
+		{
+			return label.root;
+		}
+		
+		public LabelTree getLabelTree()
 		{
 			return label;
 		}

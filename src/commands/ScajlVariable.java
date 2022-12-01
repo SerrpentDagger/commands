@@ -199,7 +199,7 @@ public abstract class ScajlVariable
 		@Override
 		public String val(Script ctx)
 		{
-			return eval(ctx).val(ctx);
+			return val(ctx, new HashSet<>());
 		}
 		
 		@Override
@@ -207,6 +207,18 @@ public abstract class ScajlVariable
 		{
 			ScajlVariable var = ctx.scope.get(modless);
 			return var == null ? NULL : var;
+		}
+		
+		private String val(Script ctx, HashSet<SVRef> selfReference)
+		{
+			selfReference.add(this);
+			ScajlVariable eval = eval(ctx);
+			if (eval instanceof SVRef)
+				if (selfReference.contains(eval))
+					return modless;
+				else
+					return ((SVRef) eval).val(ctx, selfReference);
+			return eval.val(ctx);
 		}
 		
 		@Override
@@ -551,8 +563,10 @@ public abstract class ScajlVariable
 			for (int i = 0; i < elements.length; i++)
 			{
 				String[] keyVal = Script.syntaxedSplit(elements[i], Script.MAP_KEY_EQ);
+				if (keyVal.length == 0)
+					continue;
 				String key = getVar(keyVal[0], true, ctx, this).val(ctx);
-				map.put(key, getVar(keyVal[1], false, ctx, this));
+				map.put(key, keyVal.length == 1 ? NULL : getVar(keyVal[1], false, ctx, this));
 			}
 		}
 		public SVMap(String input, String modless, LinkedHashMap<String, ScajlVariable> map, SVMember selfCtx)
@@ -670,7 +684,7 @@ public abstract class ScajlVariable
 		{
 			LinkedHashMap<String, ScajlVariable> deepCopy = new LinkedHashMap<>();
 			SVMap clone = new SVMap(input, modless, deepCopy, selfCtx.get());
-			SVMember old = selfReference.put(this, clone);
+			selfReference.put(this, clone);
 			Iterator<Entry<String, ScajlVariable>> it = map.entrySet().iterator();
 			while (it.hasNext())
 			{
@@ -688,8 +702,6 @@ public abstract class ScajlVariable
 				else
 					deepCopy.put(ent.getKey(), sRef);
 			}
-			if (old == null)
-				selfReference.remove(this);
 			return clone;
 		}
 		
@@ -761,7 +773,7 @@ public abstract class ScajlVariable
 		{
 			ScajlVariable[] deepCopy = Arrays.copyOf(array, array.length);
 			SVTokGroup clone = new SVTokGroup(input, modless, deepCopy, selfCtx.get());
-			SVMember old = selfReference.put(this, clone);
+			selfReference.put(this, clone);
 			for (int i = 0; i < deepCopy.length; i++)
 			{
 				ScajlVariable cop = deepCopy[i], sRef = selfReference.get(cop);
@@ -776,8 +788,6 @@ public abstract class ScajlVariable
 				else
 					deepCopy[i] = sRef;
 			}
-			if (old != null)
-				selfReference.remove(this);
 			return clone;
 		}
 		

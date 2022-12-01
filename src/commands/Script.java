@@ -52,6 +52,7 @@ import commands.CmdArg.TypeArg;
 import commands.CmdArg.VarCmdArg;
 import commands.Command.CommandResult;
 import commands.Command.RunnableCommand;
+import commands.Label.LabelTree;
 import commands.ParseTracker.BoxTracker;
 import commands.ParseTracker.DelimTracker;
 import commands.ParseTracker.MultiTracker;
@@ -139,8 +140,9 @@ public class Script
 	////////////////
 	
 	public int parseLine = -1;
-	protected final Scope scope = new Scope();
 	private final HashMap<String, Label> labels = new HashMap<String, Label>();
+	private final LabelTree labelTree = new LabelTree(GLOBAL);
+	protected final Scope scope = new Scope(labelTree);
 	private final ArrayDeque<StackEntry> stack = new ArrayDeque<StackEntry>();
 	private StackEntry popped = null;
 	private Script parent = null;
@@ -756,27 +758,53 @@ public class Script
 	}).rawArg(0).setVarArgs();
 	public static final Command TEST = add("test", BOOL, "Returns true if each variable matches its corresponding Pattern.", CmdArg.VAR_PATTERN).setFunc((ctx, objs) ->
 	{
-		for (VarPattern pat : (VarPattern[]) objs[0])
-			if (!pat.pattern.test(pat.var, ctx))
+		for (Object[] varPat : (Object[][]) objs[0])
+			if (!((ScajlVariable) varPat[1]).test(((Variable) varPat[0]).var, ctx))
 				return FALSE;
 		return TRUE;
 	}).setVarArgs();
 	public static final Command ENFORCE = add("enforce", BOOL, "Enforces the structure of each variable to match that of the corresponding Pattern. Primitive values will be overwritten in the appropriate scope. Containers will be updated by refererence if possible. Returns whether or not a variable was enforced.", CmdArg.VAR_PATTERN).setFunc((ctx, objs) ->
 	{
 		boolean upd = false;
-		for (VarPattern pat : (VarPattern[]) objs[0])
-			if (pat.name != null && !pat.pattern.test(pat.var, ctx))
+		for (Object[] varPat : (Object[][]) objs[0])
+		{
+			Variable var = (Variable) varPat[0];
+			ScajlVariable pat = (ScajlVariable) varPat[1];
+			if (var.name != null && !pat.test(var.var, ctx))
 			{
-				ctx.putVar(pat.name, pat.pattern.enforce(pat.var, ctx));
+				ctx.putVar(var.name, pat.enforce(var.var, ctx));
 				upd = true;
 			}
+		}
 		return boolOf(upd);
+	}).setVarArgs();
+	public static final Command ENFORCE_ONE = add("enforce_one", BOOL, "Enforces the structure of the variable to match that of the first Pattern as in 'enforce', but only if it does not match any of the provided Patterns. Returns whether or not the variable was enforced.", CmdArg.VAR_PATTERN, CmdArg.PATTERN).setFunc((ctx, objs) ->
+	{
+		Object[] varPat = (Object[]) objs[0];
+		Variable var = (Variable) varPat[0];
+		ScajlVariable pat = (ScajlVariable) varPat[1];
+		if (!pat.test(var.var, ctx))
+		{
+			ctx.putVar(var.name, pat.enforce(var.var, ctx));
+			return TRUE;
+		}
+		for (ScajlVariable othPat : (ScajlVariable[]) objs[1])
+			if (!othPat.test(var.var, ctx))
+			{
+				ctx.putVar(var.name, othPat.enforce(var.var, ctx));
+				return TRUE;
+			}
+		return FALSE;
 	}).setVarArgs();
 	public static final Command ASSERT = add("assert", VOID, "Throws an exception if the strucure of each variable does not match that of the corresponding Pattern.", CmdArg.VAR_PATTERN).setFunc((ctx, objs) ->
 	{
-		for (VarPattern pat : (VarPattern[]) objs[0])
-			if (!pat.pattern.test(pat.var, ctx))
-				ctx.parseExcept("Illegal variable value", "Variable named '" + pat.name + "', with value '" + pat.var.raw() + "' does not match the required Pattern defined by the default '" + pat.pattern.raw() + "'");
+		for (Object[] varPat : (Object[][]) objs[0])
+		{
+			Variable var = (Variable) varPat[0];
+			ScajlVariable pat = (ScajlVariable) varPat[1];
+			if (!pat.test(var.var, ctx))
+				ctx.parseExcept("Illegal variable value", "Variable named '" + var.name + "', with value '" + var.var.raw() + "' does not match the required Pattern defined by the default '" + pat.raw() + "'");
+		}
 		return ctx.prev();
 	}).setVarArgs();
 	public static final Command EQUALS = add("equals", BOOL, "Checks whether or not all the inputs are 'equal'.", CmdArg.SCAJL_VARIABLE).setFunc((ctx, objs) ->
@@ -817,14 +845,18 @@ public class Script
 		}
 		return TRUE;
 	}).rawArg(0).setVarArgs();
-	public static final Command IS_ARRAY = add("is_array", BOOL, "Checks whether or not the token is an array.", CmdArg.TOKEN).setFunc((ctx, objs) ->
+	public static final Command OF_TYPE = add("of_type", BOOL, "Checks whether or not all the variables are of the given Scajl primitive types.", CmdArg.combine(CmdArg.SCAJL_VARIABLE, CmdArg.STRING)).setFunc((ctx, objs) ->
 	{
-		String[] vars = (String[]) objs[0];
-		for (String var : vars)
-			if (!(ScajlVariable.getVar(var, false, ctx) instanceof SVArray))
+		Object[][] varStrs = (Object[][]) objs[0];
+		for (Object[] varStr : varStrs)
+			if (!((ScajlVariable) varStr[0]).type().equals(varStr[1]))
 				return FALSE;
 		return TRUE;
-	}).rawArg(0).setVarArgs();
+	}).setVarArgs();
+	public static final Command GET_TYPE = add("get_type", STRING, "Returns the Scajl primitive type of the given variable.", CmdArg.SCAJL_VARIABLE).setFunc((ctx, objs) ->
+	{
+		return strOf(((ScajlVariable) objs[0]).type());
+	});
 	public static final Command IS_TYPE = add("is_type", BOOL, "Checks whether or not the token represents a recognized type name.", CmdArg.TOKEN).setFunc((ctx, objs) ->
 	{
 		for (String var : (String[]) objs[0])
@@ -1075,7 +1107,7 @@ public class Script
 	public static final Command FOR = add("for", VOID, "Excecutes the given token label the given number of times.", CmdArg.INT, CmdArg.LABEL, CmdArg.VAR_SET).setFunc((ctx, objs) ->
 	{
 		int count = (int) objs[0];
-		for (int i = 0; i < count; i++)
+		for (int i = 0; !ctx.forceKill.get() && i < count; i++)
 		{
 			ctx.putVar(INDEX, numOf(i));
 			ctx.runFrom((Label) objs[1], (VarSet[]) objs[2]);
@@ -1087,7 +1119,7 @@ public class Script
 	{
 		int wL = ctx.parseLine;
 		int ind = 0;
-		while (ctx.valParse(CmdArg.BOOLEAN, ctx.lines[wL], null, (String) objs[0]))
+		while (!ctx.forceKill.get() && ctx.valParse(CmdArg.BOOLEAN, ctx.lines[wL], null, (String) objs[0]))
 		{
 			ctx.putVar(INDEX, numOf(ind));
 			ind++;
@@ -1128,7 +1160,7 @@ public class Script
 			return arrOf(rets);
 	}).setVarArgs();
 	public static final Command ECH = overload("~", ECHO, "Just a shorter name.", (objs) -> objs, ECHO.args).setVarArgs();
-	public static final Command PACK = add("pack", VOID, "If the dimensions of the given array is less than the given, returns a new array packed to the given dimensions. Otherwise returns the given array.", CmdArg.combine(CmdArg.SCAJL_VARIABLE, CmdArg.INT_POSITIVE)).setFunc((ctx, objs) ->
+	public static final Command PACK = add("pack", TOKEN_ARR, "If the dimensions of the given array is less than the given, returns a new array packed to the given dimensions. Otherwise returns the given array.", CmdArg.combine(CmdArg.SCAJL_VARIABLE, CmdArg.INT_POSITIVE)).setFunc((ctx, objs) ->
 	{
 		Object[][] varInts = (Object[][]) objs[0];
 		ScajlVariable[] outA = new ScajlVariable[varInts.length];
@@ -2019,7 +2051,7 @@ public class Script
 	
 	public String getParseExceptString(String preAt, String postLine, String extra)
 	{
-		return preAt + " at line " + (parseLine + 1) + ": " + postLine + ", from: " + scope.getLast().getLabel().name + "." + stack.peek().to.name + " | " + lines[parseLine]
+		return preAt + " at line " + (parseLine + 1) + ": " + postLine + ", from: " + scope.getLast().getLabel().name + "." + stack.peek().to.root.name + " | " + lines[parseLine]
 				+ (extra == null ? "." : ", extra info: " + extra);
 	}
 	
@@ -2151,12 +2183,17 @@ public class Script
 			String line = stripComments(scan.nextLine());
 			if (line.startsWith(LABEL) || line.startsWith(SCOPED_LABEL))
 				putLabel(firstToken(line), num);
+			else if (!line.isEmpty() && firstToken(line).equals(RETURN.name))
+				labelTree.close();
 			else if (startsWith(line, SCOPE_S))
 			{
 				Label anon = new Label(SCOPED_LABEL + noScope.matcher(line).replaceFirst("") + "ANON" + anonScopeId++, num);
 				labels.put(anon.name, anon);
 				anonScope.put(num, anon);
+				labelTree.open(anon);
 			}
+			else if (endsWith(line, SCOPE_E) && LEGAL_ANON_SCOPE_MATCHER.matcher(line).matches())
+				labelTree.close();
 			else if (line.startsWith(END_SCRIPT))
 				break;
 			else if (line.endsWith(END_SCRIPT))
@@ -2170,6 +2207,7 @@ public class Script
 			str += line.trim() + "\n";
 			num++;
 		}
+		labelTree.close();
 		lines = str.split("\n");
 		for (int i = merges.size() - 1; i >= 0; i--)
 		{
@@ -2245,7 +2283,7 @@ public class Script
 					if (line.equals(HELP_CHAR_STR))
 						PRINT_COMMANDS.func.cmd(this, (Object[]) null);
 					else if (startsWith(line, SCOPE_S) && LEGAL_ANON_SCOPE_MATCHER.matcher(line).matches())
-						scope.push(anonScope.get(parseLine));
+						scope.push(labelTree.getFor(anonScope.get(parseLine)));
 					else if (endsWith(line, SCOPE_E) && LEGAL_ANON_SCOPE_MATCHER.matcher(line).matches())
 						scope.pop();
 					else
@@ -2429,6 +2467,14 @@ public class Script
 	{
 		Label lab = new Label(label, line);
 		labels.put(lab.name, lab);
+		try
+		{
+			labelTree.open(lab);
+		}
+		catch (IllegalStateException e)
+		{
+			throw new CommandParseException("Invalid Label closure at line " + (line - 1) + ". No label to return from. Labels are opened with '--' or '~~'.");
+		}
 	}
 	
 	public Label getLabel(String label)
@@ -2438,10 +2484,14 @@ public class Script
 	
 	private void pushStack(Label to)
 	{
-		stack.push(new StackEntry(parseLine, to));
+		LabelTree toTree = to == GLOBAL ? labelTree : stack.peek().to.getFor(to);
+		if (toTree == null)
+			throw new CommandParseException("Attempt to push stack to out-of-scope Label: " + to.name + ", from context: " + stack.peek().to);
+
+		stack.push(new StackEntry(parseLine, toTree));
 		parseLine = to.line + 1;
 		if (to.isScoped)
-			scope.push(to);
+			scope.push(toTree);
 		if (printingDebug())
 			debugger.info("RUNNING FROM:", to.name, "");
 	}
@@ -2451,10 +2501,10 @@ public class Script
 		StackEntry ent = stack.pop();
 		popped = ent;
 		parseLine = ent.from;
-		if (ent.to.isScoped)
+		if (ent.to.root.isScoped)
 			return scope.pop();
 		if (printingDebug())
-			debugger.info("RETURNING FROM:", ent.to.name, "");
+			debugger.info("RETURNING FROM:", ent.to.root.name, "");
 		return scope.getLast();
 	}
 	
