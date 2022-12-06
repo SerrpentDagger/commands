@@ -140,7 +140,7 @@ public class Script
 	////////////////
 	
 	public int parseLine = -1;
-	private final HashMap<String, Label> labels = new HashMap<String, Label>();
+//	private final HashMap<String, Label> labels = new HashMap<String, Label>();
 	private final LabelTree labelTree = new LabelTree(GLOBAL);
 	protected final Scope scope = new Scope(labelTree);
 	private final ArrayDeque<StackEntry> stack = new ArrayDeque<StackEntry>();
@@ -1134,11 +1134,11 @@ public class Script
 		return ctx.prev();
 	}).setVarArgs();
 	public static final Command GOTO = overload("goto", CALL, "No difference, but exists for temporary backwards compatibility.", (objs) -> objs, CALL.args).setVarArgs();
-	public static final Command RETURN = add("return", "Value", "Marks the end of a label or code section. If present, will set PREV to argument, or array of arguments if more than one is provided.", CmdArg.SCAJL_VARIABLE).setFunc((ctx, objs) ->
+	public static final Command RETURN = add("return", "Variable", "Marks the end of a label or code section. If present, will set PREV to argument, or array of arguments if more than one is provided.", CmdArg.SCAJL_VARIABLE).setFunc((ctx, objs) ->
 	{
 		ScajlVariable[] rets = (ScajlVariable[]) objs[0];
-		for (int i = 0; i < rets.length; i++)
-			rets[i] = rets[i].eval(ctx);
+		//for (int i = 0; i < rets.length; i++)
+		//	rets[i] = rets[i].eval(ctx);
 		SNode last = ctx.popStack();
 		if (rets.length == 0)
 			return last.get(PREVIOUS);
@@ -1147,7 +1147,7 @@ public class Script
 		else
 			return arrOf(rets);
 	}).setVarArgs();
-	public static final Command ECHO = add("echo", VOID, "Sets PREV to argument, or array of arguments if more than one is provided.", CmdArg.SCAJL_VARIABLE).setFunc((ctx, objs) ->
+	public static final Command ECHO = add("echo", VALUE, "Sets PREV to argument, or array of arguments if more than one is provided.", CmdArg.SCAJL_VARIABLE).setFunc((ctx, objs) ->
 	{
 		ScajlVariable[] rets = (ScajlVariable[]) objs[0];
 		for (int i = 0; i < rets.length; i++)
@@ -2188,7 +2188,7 @@ public class Script
 			else if (startsWith(line, SCOPE_S))
 			{
 				Label anon = new Label(SCOPED_LABEL + noScope.matcher(line).replaceFirst("") + "ANON" + anonScopeId++, num);
-				labels.put(anon.name, anon);
+		//		labels.put(anon.name, anon);
 				anonScope.put(num, anon);
 				labelTree.open(anon);
 			}
@@ -2466,7 +2466,7 @@ public class Script
 	private void putLabel(String label, int line)
 	{
 		Label lab = new Label(label, line);
-		labels.put(lab.name, lab);
+	//	labels.put(lab.name, lab);
 		try
 		{
 			labelTree.open(lab);
@@ -2479,7 +2479,13 @@ public class Script
 	
 	public Label getLabel(String label)
 	{
-		return labels.get(label.replaceFirst(LABEL_REG, ""));
+		LabelTree tree = stack.peek().to.getFor(label.replaceFirst(LABEL_REG, ""));
+		return tree == null ? null : tree.root;
+	}
+	
+	protected LabelTree getCurrentTree()
+	{
+		return stack.peek().to;
 	}
 	
 	private void pushStack(Label to)

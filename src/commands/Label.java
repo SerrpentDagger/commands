@@ -91,22 +91,32 @@ public class Label
 			return this;
 		}
 		
-		public boolean contains(Label label)
+		public boolean contains(String label)
 		{
-			return subs.containsKey(label.name);
+			return subs.containsKey(label);
 		}
 		
-		public LabelTree getFor(Label label)
+		public boolean contains(Label label)
+		{
+			return contains(label.name);
+		}
+		
+		public LabelTree getFor(String label)
 		{
 			LabelTree parent = this;
 			while (parent != null)
 			{
-				LabelTree got = parent.subs.get(label.name);
+				LabelTree got = parent.subs.get(label);
 				if (got != null)
 					return got;
 				parent = parent.parent.get();
 			}
 			return null;
+		}
+		
+		public LabelTree getFor(Label label)
+		{
+			return getFor(label.name);
 		}
 		
 		public boolean accessibleHere(Label label)

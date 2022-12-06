@@ -76,4 +76,16 @@ public class Str implements ScajlClone<Str>
 	{
 		return new Str(val);
 	}
+	
+	@Override
+	public String toString()
+	{
+		return val;
+	}
+	
+	@Override
+	public boolean equals(Object obj)
+	{
+		return obj instanceof Str && val.equals(((Str) obj).val);
+	}
 }

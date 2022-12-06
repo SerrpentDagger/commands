@@ -4,6 +4,7 @@ import java.util.Arrays;
 import java.util.Comparator;
 
 import annotations.Desc;
+import utilities.ArrayUtils;
 
 @Desc("A utility class to provide functions that deal with arrays.")
 public abstract class Array
@@ -50,5 +51,10 @@ public abstract class Array
 		for (int i = 0; i < arr.length; i++)
 			out[out.length - 1 - i] = arr[i];
 		return out;
+	}
+	
+	public static Object[] append(Object[] arr, Object val)
+	{
+		return ArrayUtils.append(arr, val);
 	}
 }
