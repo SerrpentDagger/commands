@@ -12,4 +12,4 @@ The command Head has three parts, in the following order:
 - `bool?print "bool is true!"`: Prints the output of the variable 'bool' is true. 
 - `:go:call Foo`: While the variable 'go' is true, call the label 'Foo'. 
 - `add->sum a, b`: Adds the variables 'a' and 'b', storing the result in 'sum'. 
-- `:{compare sum < 100}:print {add->sum sum, a}`: 
+- `:{compare sum < 100}:print {add->sum sum, a}`: While 'sum' is less than 100, increment 'sum' by 'a'. 
