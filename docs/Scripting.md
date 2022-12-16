@@ -1,4 +1,10 @@
 # Scripting
+## Ending a Script With ==
+A Script can be ended by the end of a file, or in some way determined by the implementing application. But a Script can also always be ended by the '==' symbol. For example, when typing in the System input, the Script will stop requesting more lines when you end one with '=='. This can also be used to cut off chunks of Script from a file without deleting them.
+
+## When in Doubt, ?
+'?' is a very useful symbol in Scajl. It causes help text to be printed about various constructs. If you enter '?' as a single line, it will give you an overview of the current structure of functionality exposed to the Scajl runtime, including global Commands, Object Types and Libraries. When used on a single element, it can give you information about a specific Command or Object Type.
+
 ## Syntax
 Scajl is a command-based scripting language. The general syntax reflects this structure. An executable Command is composed of a Head, and an Argument list. These can further be broken down. There are then several expansions on this format, which allow for greater flexibility in scripting.
 ### The Command Head
