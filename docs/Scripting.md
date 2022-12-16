@@ -1,9 +1,9 @@
 # Contents
-- [Scripting](Scripting)
+- [Scripting](#scripting)
 - [Syntax](#syntax)
-- [Comments](Comments)
-- [Labels and Scope](Labels and Scope)
-- [Primitive Types](Primitive Types)
+- [Comments](#comments)
+- [Labels and Scope](#labels-and-scope)
+- [Primitive Types](#scajl-primitive-types)
 
 # Scripting
 ## Ending a Script With ==
