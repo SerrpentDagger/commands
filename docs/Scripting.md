@@ -1,3 +1,10 @@
+# Contents
+- [Scripting](Scripting)
+- [Syntax](#syntax)
+- [Comments](Comments)
+- [Labels and Scope](Labels and Scope)
+- [Primitive Types](Primitive Types)
+
 # Scripting
 ## Ending a Script With ==
 A Script can be ended by the end of a file, or in some way determined by the implementing application. But a Script can also always be ended by the '==' symbol. For example, when typing in the System input, the Script will stop requesting more lines when you end one with '=='. This can also be used to cut off chunks of Script from a file without deleting them.
