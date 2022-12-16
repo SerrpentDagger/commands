@@ -29,7 +29,7 @@ import javax.swing.JToggleButton;
 
 import annotations.ScajlClone;
 import commands.CmdArg;
-import commands.Script;
+import commands.Scajl;
 import commands.ScriptObject;
 import jbuilder.JBuilder;
 import jbuilder.JBuilder.OnClose;
@@ -55,53 +55,53 @@ public class BuiltInLibs
 		CmdArg.funcInterfaceOf(BinaryOperator.class, (match) -> (a, b) -> match.run(a, b));
 		
 	
-		Script.expose(Object.class, false);
+		Scajl.expose(Object.class, false);
 		Class<?>[] toExp = new Class[]
 		{
 			Integer.class,
 			Double.class,
 			String.class
 		};
-		Script.exposeAll(toExp, Script.SAFE_CLASS_EXPOSE_FILTER,
-				(member, rec) -> member instanceof Field && Script.SAFE_EXPOSE_FILTER.test(member, rec), false);
+		Scajl.exposeAll(toExp, Scajl.SAFE_CLASS_EXPOSE_FILTER,
+				(member, rec) -> member instanceof Field && Scajl.SAFE_EXPOSE_FILTER.test(member, rec), false);
 		
-		ScriptObject<Num> num = Script.expose(Num.class, true);
+		ScriptObject<Num> num = Scajl.expose(Num.class, true);
 		num.add(CmdArg.prefixedOf(CmdArg.inlineOf((objs) -> new Num((Double) objs[0]), num.argOf(), CmdArg.DOUBLE), "N"));
 		
-		ScriptObject<Bool> bool = Script.expose(Bool.class, true);
+		ScriptObject<Bool> bool = Scajl.expose(Bool.class, true);
 		bool.add(CmdArg.prefixedOf(CmdArg.inlineOf((objs) -> new Bool((Boolean) objs[0]), bool.argOf(), CmdArg.BOOLEAN), "B"));
 		
-		ScriptObject<Str> str = Script.expose(Str.class, true);
+		ScriptObject<Str> str = Scajl.expose(Str.class, true);
 		str.add(CmdArg.prefixedOf(CmdArg.inlineOf((objs) -> new Str((String) objs[0]), str.argOf(), CmdArg.STRING), "S"));
 		
-		ScriptObject<Complex> complex = Script.expose(Complex.class, true);
+		ScriptObject<Complex> complex = Scajl.expose(Complex.class, true);
 		complex.add(CmdArg.prefixedOf(CmdArg.inlineOf((objs) -> Complex.ofABi(0, (Double) objs[0]), complex.argOf(), CmdArg.DOUBLE), "Imaj")
 				.add("Real", CmdArg.inlineOf((objs) -> Complex.ofABi((Double) objs[0], 0), complex.argOf(), CmdArg.DOUBLE)));
 		complex.add(CmdArg.prefixedOf(CmdArg.inlineOf((objs) -> Complex.ofABi((Double) objs[0], (Double) objs[1]), complex.argOf(), CmdArg.DOUBLE, CmdArg.DOUBLE), "ReIm")
 				.add("MgAn", CmdArg.inlineOf((objs) -> Complex.ofRTheta((Double) objs[0], (Double) objs[1]), complex.argOf(), CmdArg.DOUBLE, CmdArg.DOUBLE)));
 		
-		Script.add("Math", () -> Script.expose(Math.class, true));
-		Script.add("Random", () -> Script.expose(Random.class, true));
-		Script.add("String", () ->
+		Scajl.add("Math", () -> Scajl.expose(Math.class, true));
+		Scajl.add("Random", () -> Scajl.expose(Random.class, true));
+		Scajl.add("String", () ->
 		{
-			Script.expose(Matcher.class, true);
-			Script.expose(Pattern.class, true);
-			Script.expose(String.class, false);
+			Scajl.expose(Matcher.class, true);
+			Scajl.expose(Pattern.class, true);
+			Scajl.expose(String.class, false);
 		});
-		Script.add("Numbers", () ->
+		Scajl.add("Numbers", () ->
 		{
-			Script.expose(Integer.class, false);
-			Script.expose(Double.class, false);
-			Script.expose(BigInteger.class, true);
+			Scajl.expose(Integer.class, false);
+			Scajl.expose(Double.class, false);
+			Scajl.expose(BigInteger.class, true);
 			ScajlClone.reg(BigInteger.class, (bi) -> new BigInteger(bi.toByteArray()));
-			Script.expose(BigDecimal.class, true);
+			Scajl.expose(BigDecimal.class, true);
 			ScajlClone.reg(BigDecimal.class, (bd) -> new BigDecimal(bd.unscaledValue(), bd.scale()));
 		});
-		Script.add("Array", () -> Script.expose(Array.class, true));
-		Script.add("JBuilder", () -> 
+		Scajl.add("Array", () -> Scajl.expose(Array.class, true));
+		Scajl.add("JBuilder", () -> 
 		{
 			CmdArg.funcInterfaceOf(OnClose.class, (match) -> (b) -> match.run(b));
-			ScriptObject<?>[] exp = Script.exposeDeclaredBy
+			ScriptObject<?>[] exp = Scajl.exposeDeclaredBy
 			(
 					Font.class,
 					Component.class,
@@ -113,14 +113,16 @@ public class BuiltInLibs
 					GridLayout.class,
 					JBuilder.class
 			);
-			Script.exposeMethodsByName(JComponent.class, exp[exp.length - 1], false, "setFont");
+			Scajl.exposeMethodsByName(JComponent.class, exp[exp.length - 1], false, "setFont");
 		});
-		Script.add("Timer", () -> Script.expose(Timer.class, true));
-		Script.add("Multithread", () ->
+		Scajl.add("Timer", () -> Scajl.expose(Timer.class, true));
+		Scajl.add("Multithread", () ->
 		{
 			CmdArg.funcInterfaceOf(ThreadFill.class, (match) -> (th) -> match.run(th));
 			CmdArg.funcInterfaceOf(ByThread.class, (match) -> (ind) -> match.run(ind));
-			Script.expose(Parallelizer.class, false);
+			Scajl.expose(Parallelizer.class, false);
 		});
+		
+		Scajl.expose(Script.class, false);
 	}
 }

@@ -111,7 +111,7 @@ public abstract class CmdArg<T>
 		public final CmdArg<TY> arg;
 		public TypeArg(Class<TY> type, CmdArg<TY> arg) { this.cl = type; this.arg = arg; }
 		@SuppressWarnings("unchecked")
-		public ScajlVariable castAndUnparse(Object obj, Script ctx) { return obj == null ? ScajlVariable.NULL : arg.unparse((TY) obj, ctx); }
+		public ScajlVariable castAndUnparse(Object obj, Scajl ctx) { return obj == null ? ScajlVariable.NULL : arg.unparse((TY) obj, ctx); }
 	}
 
 	/////////////////////////////////////////
@@ -132,7 +132,7 @@ public abstract class CmdArg<T>
 		String[] rt = this.type.split(" ");
 		for (int j = 0; j < rt.length; j++)
 		{
-			rt[j] = (this.rawToken(j) ? Script.RAW : "") + rt[j];
+			rt[j] = (this.rawToken(j) ? Scajl.RAW : "") + rt[j];
 			inf += rt[j] + (j == rt.length - 1 ? "" : " ");
 		}
 		return inf;
@@ -147,12 +147,12 @@ public abstract class CmdArg<T>
 		return this;
 	}
 	
-	public abstract T parse(String trimmed, String[] tokens, Script ctx);
-	public T parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
+	public abstract T parse(String trimmed, String[] tokens, Scajl ctx);
+	public T parse(String[] tokens, ScajlVariable[] vars, int off, Scajl ctx)
 	{
 		return parse(tokens, off, ctx);
 	}
-	public T parse(String[] tokens, int off, Script ctx)
+	public T parse(String[] tokens, int off, Scajl ctx)
 	{
 		String str = "";
 		int count = tokenCount();
@@ -171,14 +171,14 @@ public abstract class CmdArg<T>
 		return parse(trimmed, null, null);
 	}
 	
-	public ScajlVariable unparse(T obj, Script ctx)
+	public ScajlVariable unparse(T obj, Scajl ctx)
 	{
 		return unparse(obj);
 	}
 	
 	public ScajlVariable unparse(T obj)
 	{
-		return Script.valOf(obj.toString());
+		return Scajl.valOf(obj.toString());
 	}
 	
 	/////////////////////////
@@ -197,13 +197,13 @@ public abstract class CmdArg<T>
 		}
 		
 		@Override
-		public T parse(String trimmed, String[] tokens, Script ctx)
+		public T parse(String trimmed, String[] tokens, Scajl ctx)
 		{
 			throw new UnsupportedOperationException("This VarCmdArg cannot parse without access to the ScajlVariable sources.");
 		}
 		
 		@Override
-		public abstract T parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx);
+		public abstract T parse(String[] tokens, ScajlVariable[] vars, int off, Scajl ctx);
 		
 		@Override
 		public VarCmdArg<T> reg()
@@ -214,7 +214,7 @@ public abstract class CmdArg<T>
 		@Override
 		public ScajlVariable unparse(T obj)
 		{
-			return Script.objOf(obj);
+			return Scajl.objOf(obj);
 		}
 	}
 	
@@ -246,7 +246,7 @@ public abstract class CmdArg<T>
 			while (it.hasNext())
 			{
 				Entry<String, CmdArg<T>> ent = it.next();
-				inf += Script.RAW + ent.getKey() + Script.RAW + " " + ent.getValue().getInfoString();
+				inf += Scajl.RAW + ent.getKey() + Scajl.RAW + " " + ent.getValue().getInfoString();
 				if (it.hasNext())
 					inf += " (or) ";
 			}
@@ -266,7 +266,7 @@ public abstract class CmdArg<T>
 		}
 		
 		@Override
-		public T parse(String trimmed, String[] tokens, Script ctx)
+		public T parse(String trimmed, String[] tokens, Scajl ctx)
 		{
 			CmdArg<T> arg = prefixes.get(tokens[0].toUpperCase());
 			if (arg == null)
@@ -295,9 +295,9 @@ public abstract class CmdArg<T>
 	public static final CmdArg<Library> LIBRARY = new CmdArg<Library>("Library", Library.class)
 	{
 		@Override
-		public Library parse(String trimmed, String[] tokens, Script ctx)
+		public Library parse(String trimmed, String[] tokens, Scajl ctx)
 		{
-			return Script.getLibrary(trimmed);
+			return Scajl.getLibrary(trimmed);
 		}	
 	}.reg();
 	
@@ -310,14 +310,14 @@ public abstract class CmdArg<T>
 		}
 		
 		@Override
-		public Object parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
+		public Object parse(String[] tokens, ScajlVariable[] vars, int off, Scajl ctx)
 		{
-			if (!Script.isType(vars[off + 1].val(ctx)))
+			if (!Scajl.isType(vars[off + 1].val(ctx)))
 				return null;
 			if (!(vars[off] instanceof SVJavObj))
 				return null;
 			SVJavObj jObj = (SVJavObj) vars[off];
-			ScriptObject<?> so = Script.getType(tokens[1]);
+			ScriptObject<?> so = Scajl.getType(tokens[1]);
 			Object[] types = jObj.value;
 			CmdArg<?> arg = so.argOf();
 			for (Object obj : types)
@@ -328,11 +328,11 @@ public abstract class CmdArg<T>
 		}
 		
 		@Override
-		public ScajlVariable unparse(Object obj, Script ctx)
+		public ScajlVariable unparse(Object obj, Scajl ctx)
 		{
 			TypeArg<?> typeArg = getTypeArgFor(obj.getClass());
 			if (typeArg.arg == null || typeArg.arg == this)
-				return Script.objOf(obj);
+				return Scajl.objOf(obj);
 			return typeArg.castAndUnparse(obj, ctx);
 		}
 	}.reg();
@@ -340,7 +340,7 @@ public abstract class CmdArg<T>
 	public static final VarCmdArg<Object> OBJECT_NO_MULTICLASS = new VarCmdArg<Object>("Object", Object.class)
 	{
 		@Override
-		public Object parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
+		public Object parse(String[] tokens, ScajlVariable[] vars, int off, Scajl ctx)
 		{
 			if (!(vars[off] instanceof SVJavObj))
 				return null;
@@ -370,7 +370,7 @@ public abstract class CmdArg<T>
 		}
 		
 		@Override
-		public Color parse(String trimmed, String[] tokens, Script ctx)
+		public Color parse(String trimmed, String[] tokens, Scajl ctx)
 		{
 			Double r, g, b;
 			r = DOUBLE.parse(tokens, 0, ctx);
@@ -384,14 +384,14 @@ public abstract class CmdArg<T>
 		@Override
 		public ScajlVariable unparse(Color obj)
 		{
-			return Script.tokenize(obj.getRed(), obj.getGreen(), obj.getBlue());
+			return Scajl.tokenize(obj.getRed(), obj.getGreen(), obj.getBlue());
 		};
 	}.reg();
 	
 	public static final CmdArg<Long> LONG = new CmdArg<Long>("Long", Long.class)
 	{
 		@Override
-		public Long parse(String trimmed, String[] tokens, Script ctx)
+		public Long parse(String trimmed, String[] tokens, Scajl ctx)
 		{
 			try
 			{
@@ -406,7 +406,7 @@ public abstract class CmdArg<T>
 	public static final CmdArg<Integer> INT = new CmdArg<Integer>("Integer", Integer.class)
 	{
 		@Override
-		public Integer parse(String trimmed, String[] tokens, Script ctx)
+		public Integer parse(String trimmed, String[] tokens, Scajl ctx)
 		{
 			try
 			{
@@ -421,7 +421,7 @@ public abstract class CmdArg<T>
 	public static final CmdArg<Integer> INT_POSITIVE = new CmdArg<Integer>("PositiveInteger", Integer.class)
 	{
 		@Override
-		public Integer parse(String trimmed, String[] tokens, Script ctx)
+		public Integer parse(String trimmed, String[] tokens, Scajl ctx)
 		{
 			Integer i = INT.parse(trimmed, tokens, ctx);
 			if (i != null && i >= 0)
@@ -439,7 +439,7 @@ public abstract class CmdArg<T>
 		}
 		
 		@Override
-		public Integer parse(String trimmed, String[] tokens, Script ctx)
+		public Integer parse(String trimmed, String[] tokens, Scajl ctx)
 		{
 			return Math.round(Math.round(DOUBLE_EXPRESSION.parse(trimmed, tokens, ctx)));
 		}
@@ -448,7 +448,7 @@ public abstract class CmdArg<T>
 	public static final CmdArg<Byte> BYTE = new CmdArg<Byte>("Byte", Byte.class)
 	{
 		@Override
-		public Byte parse(String trimmed, String[] tokens, Script ctx)
+		public Byte parse(String trimmed, String[] tokens, Scajl ctx)
 		{
 			Integer i = INT.parse(trimmed, tokens, ctx);
 			return i == null ? null : (byte) (int) i;
@@ -458,7 +458,7 @@ public abstract class CmdArg<T>
 	public static final CmdArg<Short> SHORT = new CmdArg<Short>("Short", Short.class)
 	{
 		@Override
-		public Short parse(String trimmed, String[] tokens, Script ctx)
+		public Short parse(String trimmed, String[] tokens, Scajl ctx)
 		{
 			Integer i = INT.parse(trimmed, tokens, ctx);
 			return i == null ? null : (short) (int) i;
@@ -468,13 +468,13 @@ public abstract class CmdArg<T>
 	public static final CmdArg<Void> VOID = new CmdArg<Void>("Void", Void.class)
 	{
 		@Override
-		public Void parse(String trimmed, String[] tokens, Script ctx)
+		public Void parse(String trimmed, String[] tokens, Scajl ctx)
 		{
 			return null;
 		}
 		
 		@Override
-		public ScajlVariable unparse(Void obj, Script ctx)
+		public ScajlVariable unparse(Void obj, Scajl ctx)
 		{
 			return ctx.prev();
 		};
@@ -483,7 +483,7 @@ public abstract class CmdArg<T>
 	public static final CmdArg<Double> DOUBLE_POSITIVE = new CmdArg<Double>("PositiveDouble", Double.class)
 	{
 		@Override
-		public Double parse(String trimmed, String[] tokens, Script ctx)
+		public Double parse(String trimmed, String[] tokens, Scajl ctx)
 		{
 			Double doub = DOUBLE.parse(trimmed, tokens, ctx);
 			if (doub != null && doub >= 0)
@@ -495,7 +495,7 @@ public abstract class CmdArg<T>
 	public static final CmdArg<Double> DOUBLE = new CmdArg<Double>("Double", Double.class)
 	{	
 		@Override
-		public Double parse(String trimmed, String[] tokens, Script ctx)
+		public Double parse(String trimmed, String[] tokens, Scajl ctx)
 		{
 			try
 			{
@@ -516,7 +516,7 @@ public abstract class CmdArg<T>
 		}
 		
 		@Override
-		public Double parse(String trimmed, String[] tokens, Script ctx)
+		public Double parse(String trimmed, String[] tokens, Scajl ctx)
 		{
 			Double a = DOUBLE.parse(tokens, 0, ctx);
 			Double b = DOUBLE.parse(tokens, 2, ctx);
@@ -530,7 +530,7 @@ public abstract class CmdArg<T>
 	public static final CmdArg<Float> FLOAT = new CmdArg<Float>("Float", Float.class)
 	{	
 		@Override
-		public Float parse(String trimmed, String[] tokens, Script ctx)
+		public Float parse(String trimmed, String[] tokens, Scajl ctx)
 		{
 			Double d = DOUBLE.parse(trimmed, tokens, ctx);
 			return d == null ? null : (float) (double) d;
@@ -540,7 +540,7 @@ public abstract class CmdArg<T>
 	public static final CmdArg<Character> CHARACTER = new CmdArg<Character>("Character", Character.class)
 	{
 		@Override
-		public Character parse(String trimmed, String[] tokens, Script ctx)
+		public Character parse(String trimmed, String[] tokens, Scajl ctx)
 		{
 			if (trimmed.length() > 1)
 				return null;
@@ -551,7 +551,7 @@ public abstract class CmdArg<T>
 	public static final CmdArg<String> TOKEN = new CmdArg<String>("Token", String.class)
 	{
 		@Override
-		public String parse(String trimmed, String[] tokens, Script ctx)
+		public String parse(String trimmed, String[] tokens, Scajl ctx)
 		{
 			if (tokens.length > 1)
 				return null;
@@ -562,10 +562,10 @@ public abstract class CmdArg<T>
 	public static final CmdArg<String> TYPE = new CmdArg<String>("Type", String.class)
 	{
 		@Override
-		public String parse(String trimmed, String[] tokens, Script ctx)
+		public String parse(String trimmed, String[] tokens, Scajl ctx)
 		{
 			String type = TOKEN.parse(trimmed, tokens, ctx);
-			if (Script.isType(type))
+			if (Scajl.isType(type))
 				return type;
 			return null;
 		}
@@ -574,7 +574,7 @@ public abstract class CmdArg<T>
 	public static final VarCmdArg<ScajlVariable> SCAJL_VARIABLE = new VarCmdArg<ScajlVariable>("Variable", ScajlVariable.class)
 	{
 		@Override
-		public ScajlVariable parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
+		public ScajlVariable parse(String[] tokens, ScajlVariable[] vars, int off, Scajl ctx)
 		{
 			return vars[off];
 		}
@@ -589,7 +589,7 @@ public abstract class CmdArg<T>
 	public static final VarCmdArg<ScajlVariable> PATTERN = new VarCmdArg<ScajlVariable>("Pattern", ScajlVariable.class)
 	{
 		@Override
-		public ScajlVariable parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
+		public ScajlVariable parse(String[] tokens, ScajlVariable[] vars, int off, Scajl ctx)
 		{
 			return SCAJL_VARIABLE.parse(tokens, vars, off, ctx);
 		}
@@ -604,7 +604,7 @@ public abstract class CmdArg<T>
 	public static final VarCmdArg<SVArray> SVARRAY = new VarCmdArg<SVArray>("Array", SVArray.class)
 	{
 		@Override
-		public SVArray parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
+		public SVArray parse(String[] tokens, ScajlVariable[] vars, int off, Scajl ctx)
 		{
 			return vars[off] instanceof SVArray ? (SVArray) vars[off] : null;
 		}
@@ -619,7 +619,7 @@ public abstract class CmdArg<T>
 	public static final VarCmdArg<SVJavObj> SVJAVOBJ = new VarCmdArg<SVJavObj>("Object", SVJavObj.class)
 	{
 		@Override
-		public SVJavObj parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
+		public SVJavObj parse(String[] tokens, ScajlVariable[] vars, int off, Scajl ctx)
 		{
 			return vars[off] instanceof SVJavObj ? (SVJavObj) vars[off] : null;
 		}
@@ -634,15 +634,15 @@ public abstract class CmdArg<T>
 	public static final VarCmdArg<SVExec> SVEXEC = new VarCmdArg<SVExec>("Executable", SVExec.class)
 	{
 		@Override
-		public SVExec parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
+		public SVExec parse(String[] tokens, ScajlVariable[] vars, int off, Scajl ctx)
 		{
 			if (vars[off] instanceof SVExec)
 				return (SVExec) vars[off];
 			Label lab = LABEL.parse(tokens, vars, off, ctx);
 			if (lab == null)
 				return null;
-			String callLab = "" + Script.SCOPE_S +  Script.CALL.name + " " + lab.name + Script.SCOPE_E;
-			return new SVExec("" + Script.REF + callLab, callLab, null);
+			String callLab = "" + Scajl.SCOPE_S +  Scajl.CALL.name + " " + lab.name + Scajl.SCOPE_E;
+			return new SVExec("" + Scajl.REF + callLab, callLab, null);
 		}
 		
 		@Override
@@ -655,7 +655,7 @@ public abstract class CmdArg<T>
 	public static final CmdArg<String> STRING = new CmdArg<String>("String", String.class)
 	{
 		@Override
-		public String parse(String trimmed, String[] tokens, Script ctx)
+		public String parse(String trimmed, String[] tokens, Scajl ctx)
 		{
 			return trimmed;
 		}
@@ -663,7 +663,7 @@ public abstract class CmdArg<T>
 		@Override
 		public ScajlVariable unparse(String obj)
 		{
-			return Script.strOf(obj);
+			return Scajl.strOf(obj);
 		};
 	}.reg();
 	static
@@ -680,7 +680,7 @@ public abstract class CmdArg<T>
 				}
 			
 				@Override
-				public String parse(String trimmed, String[] tokens, Script ctx)
+				public String parse(String trimmed, String[] tokens, Scajl ctx)
 				{
 					return trimmed;
 				}
@@ -697,7 +697,7 @@ public abstract class CmdArg<T>
 	public static final CmdArg<Boolean> BOOLEAN = new CmdArg<Boolean>("Boolean", Boolean.class)
 	{
 		@Override
-		public Boolean parse(String trimmed, String[] tokens, Script ctx)
+		public Boolean parse(String trimmed, String[] tokens, Scajl ctx)
 		{
 			switch (trimmed)
 			{
@@ -720,7 +720,7 @@ public abstract class CmdArg<T>
 		}
 
 		@Override
-		public BooleanThen parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
+		public BooleanThen parse(String[] tokens, ScajlVariable[] vars, int off, Scajl ctx)
 		{
 			Boolean b = BOOLEAN.parse(vars[off].val(ctx));
 			if (b == null)
@@ -738,7 +738,7 @@ public abstract class CmdArg<T>
 		}
 		
 		@Override
-		public BooleanExp parse(String trimmed, String[] tokens, Script ctx)
+		public BooleanExp parse(String trimmed, String[] tokens, Scajl ctx)
 		{
 			try
 			{
@@ -757,14 +757,14 @@ public abstract class CmdArg<T>
 		@Override
 		public ScajlVariable unparse(BooleanExp obj)
 		{
-			return Script.tokenize("" + obj.a, obj.comp.display, "" + obj.b);
+			return Scajl.tokenize("" + obj.a, obj.comp.display, "" + obj.b);
 		}
 	}.reg();
 	
 	public static final CmdArg<Label> LABEL = new CmdArg<Label>("Label", Label.class)
 	{
 		@Override
-		public Label parse(String trimmed, String[] tokens, Script ctx)
+		public Label parse(String trimmed, String[] tokens, Scajl ctx)
 		{
 			return ctx.getLabel(trimmed);
 		}
@@ -779,7 +779,7 @@ public abstract class CmdArg<T>
 		}
 		
 		@Override
-		public Variable parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
+		public Variable parse(String[] tokens, ScajlVariable[] vars, int off, Scajl ctx)
 		{
 			ScajlVariable var = ctx.getVar(tokens[off], false, null);
 			Variable out = new Variable(var, tokens[off]);
@@ -806,7 +806,7 @@ public abstract class CmdArg<T>
 		}
 		
 		@Override
-		public VarSet parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
+		public VarSet parse(String[] tokens, ScajlVariable[] vars, int off, Scajl ctx)
 		{
 			String v;
 			ScajlVariable s;
@@ -833,7 +833,7 @@ public abstract class CmdArg<T>
 		}
 		
 		@Override
-		public BoolVarSet parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
+		public BoolVarSet parse(String[] tokens, ScajlVariable[] vars, int off, Scajl ctx)
 		{
 			Boolean b;
 			String v;
@@ -862,7 +862,7 @@ public abstract class CmdArg<T>
 		}
 		
 		@Override
-		public IntVarSet parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
+		public IntVarSet parse(String[] tokens, ScajlVariable[] vars, int off, Scajl ctx)
 		{
 			Integer i;
 			String v;
@@ -916,7 +916,7 @@ public abstract class CmdArg<T>
 						}
 						
 						@Override
-						public Object[] parse(String trimmed, String[] tokens, Script ctx)
+						public Object[] parse(String trimmed, String[] tokens, Scajl ctx)
 						{
 							Object[] out = new Object[count];
 							for (int i = 0; i < count;)
@@ -945,7 +945,7 @@ public abstract class CmdArg<T>
 						}
 				
 						@Override
-						public Object[] parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
+						public Object[] parse(String[] tokens, ScajlVariable[] vars, int off, Scajl ctx)
 						{
 							Object[] out = new Object[count];
 							for (int i = off; i < count;)
@@ -975,7 +975,7 @@ public abstract class CmdArg<T>
 		}
 		
 		@Override
-		public IntVarSet parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
+		public IntVarSet parse(String[] tokens, ScajlVariable[] vars, int off, Scajl ctx)
 		{
 			Integer i;
 			String v;
@@ -1004,7 +1004,7 @@ public abstract class CmdArg<T>
 		}
 		
 		@Override
-		public VarIntTok parse(String trimmed, String[] tokens, Script ctx)
+		public VarIntTok parse(String trimmed, String[] tokens, Scajl ctx)
 		{
 			String v;
 			Integer i;
@@ -1111,7 +1111,7 @@ CmdArg.funcInterfaceOf(Pos3dVal.class, (matching) -> (pos) -> (double) matching.
 		VarCmdArg<X> arg = new VarCmdArg<X>(typeName, funcInt)
 		{
 			@Override
-			public X parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
+			public X parse(String[] tokens, ScajlVariable[] vars, int off, Scajl ctx)
 			{
 				SVExec exec = SVEXEC.parse(tokens, vars, off, ctx);
 				return transformer.transform((objs) ->
@@ -1143,7 +1143,7 @@ CmdArg.funcInterfaceOf(Pos3dVal.class, (matching) -> (pos) -> (double) matching.
 			@Override
 			public ScajlVariable unparse(X obj)
 			{
-				return Script.objOf(obj);
+				return Scajl.objOf(obj);
 			};
 		}.reg();
 		
@@ -1182,7 +1182,7 @@ CmdArg.funcInterfaceOf(Pos3dVal.class, (matching) -> (pos) -> (double) matching.
 			pref = new PrefCmdArg<X>(prefix + " " + arg.type, arg.cls)
 			{
 				@Override
-				public ScajlVariable unparse(X obj, Script ctx)
+				public ScajlVariable unparse(X obj, Scajl ctx)
 				{
 					return arg.unparse(obj, ctx);
 				}
@@ -1227,7 +1227,7 @@ CmdArg.funcInterfaceOf(Pos3dVal.class, (matching) -> (pos) -> (double) matching.
 			}
 			
 			@Override
-			public T parse(String trimmed, String[] tokens, Script ctx)
+			public T parse(String trimmed, String[] tokens, Scajl ctx)
 			{
 				Object[] objs = new Object[args.length];
 				int t = 0;
@@ -1246,7 +1246,7 @@ CmdArg.funcInterfaceOf(Pos3dVal.class, (matching) -> (pos) -> (double) matching.
 			}
 			
 			@Override
-			public ScajlVariable unparse(T obj, Script ctx)
+			public ScajlVariable unparse(T obj, Scajl ctx)
 			{
 				return original.unparse(obj, ctx);
 			}
@@ -1261,7 +1261,7 @@ CmdArg.funcInterfaceOf(Pos3dVal.class, (matching) -> (pos) -> (double) matching.
 		{
 			@SuppressWarnings("unchecked")
 			@Override
-			public X parse(String trimmed, String[] tokens, Script ctx)
+			public X parse(String trimmed, String[] tokens, Scajl ctx)
 			{
 				Object obj = wrappedArg.parse(trimmed, tokens, ctx);
 				if (obj == null)
@@ -1277,10 +1277,10 @@ CmdArg.funcInterfaceOf(Pos3dVal.class, (matching) -> (pos) -> (double) matching.
 		Class<?> wrapped = WRAP_PRIMITIVE.get(prim);
 		CmdArg<?> wrappedArg = getArgFor(wrapped);
 		@SuppressWarnings("unchecked")
-		VarCmdArg<X> array = new VarCmdArg<X>(Script.ARR_S + prim.getSimpleName() + Script.ARR_E, primArray)
+		VarCmdArg<X> array = new VarCmdArg<X>(Scajl.ARR_S + prim.getSimpleName() + Scajl.ARR_E, primArray)
 		{
 			@Override
-			public X parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
+			public X parse(String[] tokens, ScajlVariable[] vars, int off, Scajl ctx)
 			{
 				if (!(vars[off] instanceof SVArray))
 					return null;
@@ -1303,8 +1303,8 @@ CmdArg.funcInterfaceOf(Pos3dVal.class, (matching) -> (pos) -> (double) matching.
 				int len = Array.getLength(obj);
 				ScajlVariable[] elements = new ScajlVariable[len];
 				for (int i = 0; i < len; i++)
-					elements[i] = Script.valOf("" + Array.get(obj, i));
-				return Script.arrOf(elements);
+					elements[i] = Scajl.valOf("" + Array.get(obj, i));
+				return Scajl.arrOf(elements);
 			};
 		}.reg();
 		return array;
@@ -1319,10 +1319,10 @@ CmdArg.funcInterfaceOf(Pos3dVal.class, (matching) -> (pos) -> (double) matching.
 		CmdArg<X[]> array = arrayBin == null ? null : (CmdArg<X[]>) arrayBin.get(1);
 		if (array == null)
 		{
-			array = new VarCmdArg<X[]>(Script.ARR_S + arg.type + Script.ARR_E, arrClass)
+			array = new VarCmdArg<X[]>(Scajl.ARR_S + arg.type + Scajl.ARR_E, arrClass)
 			{
 				@Override
-				public X[] parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
+				public X[] parse(String[] tokens, ScajlVariable[] vars, int off, Scajl ctx)
 				{
 					if (!(vars[off] instanceof SVArray))
 						return null;
@@ -1343,19 +1343,19 @@ CmdArg.funcInterfaceOf(Pos3dVal.class, (matching) -> (pos) -> (double) matching.
 				}
 				
 				@Override
-				public ScajlVariable unparse(X[] obj, Script ctx)
+				public ScajlVariable unparse(X[] obj, Scajl ctx)
 				{
 					ScajlVariable[] elements = new ScajlVariable[obj.length];
 					for (int i = 0; i < obj.length; i++)
 						elements[i] = arg.unparse(obj[i], ctx);
-					return Script.arrOf(elements);
+					return Scajl.arrOf(elements);
 				}
 			}.reg();
 		}
 		
 		return array;
 	}
-	private static <X> X parseArrayElement(CmdArg<X> arg, ScajlVariable elm, boolean noUnpack, Script ctx)
+	private static <X> X parseArrayElement(CmdArg<X> arg, ScajlVariable elm, boolean noUnpack, Scajl ctx)
 	{
 		ScajlVariable[] eVars;
 		if (!noUnpack && elm instanceof SVTokGroup && !arg.cls.isAssignableFrom(SVTokGroup.class))
@@ -1365,7 +1365,7 @@ CmdArg.funcInterfaceOf(Pos3dVal.class, (matching) -> (pos) -> (double) matching.
 		CmdArg<X> elmArg = getArgForCount(arg, eVars.length);
 		if (elmArg == null)
 		{
-			ctx.parseExcept("Invalid array token resolution", "The format '" + arg.type + "' requires " + arg.tokenCount() + " tokens, but " + eVars.length + " have been provided. Tokens are separated by spaces, and automatically unpacked when parsing an Array unless that Array was declared with the " + Script.NO_UNPACK + " modifier.");
+			ctx.parseExcept("Invalid array token resolution", "The format '" + arg.type + "' requires " + arg.tokenCount() + " tokens, but " + eVars.length + " have been provided. Tokens are separated by spaces, and automatically unpacked when parsing an Array unless that Array was declared with the " + Scajl.NO_UNPACK + " modifier.");
 			return null;
 		}
 		String[] toks = null;

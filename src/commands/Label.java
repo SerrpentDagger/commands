@@ -15,13 +15,13 @@ public class Label
 	
 	public Label(String labelText, int line)
 	{
-		isScoped = labelText.startsWith(Script.SCOPED_LABEL);
-		labelText = labelText.replaceFirst(Script.LABEL_REG, "").trim();
-		MixedPair<boolean[], String> labelModsModless = Script.prefixModsFrom(labelText, Script.VALID_LABEL_MODS);
+		isScoped = labelText.startsWith(Scajl.SCOPED_LABEL);
+		labelText = labelText.replaceFirst(Scajl.LABEL_REG, "").trim();
+		MixedPair<boolean[], String> labelModsModless = Scajl.prefixModsFrom(labelText, Scajl.VALID_LABEL_MODS);
 		boolean[] labelMods = labelModsModless.a();
 		isAccessible = labelMods[0];
 		getsAccess = labelMods[1];
-		Matcher match = Script.LABEL_MODS_PATTERN.matcher(labelText);
+		Matcher match = Scajl.LABEL_MODS_PATTERN.matcher(labelText);
 		name = match.replaceFirst("");
 		this.line = line;
 	}

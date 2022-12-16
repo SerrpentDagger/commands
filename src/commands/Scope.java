@@ -50,7 +50,7 @@ public class Scope
 
 			n2.vars.forEach((var, val) ->
 			{
-				if (!var.equals(Script.PARENT))
+				if (!var.equals(Scajl.PARENT))
 					n1.put(var, val);
 			});
 		}

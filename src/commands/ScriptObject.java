@@ -37,7 +37,7 @@ public class ScriptObject<T>
 		cmdArg = new VarCmdArg<T>(typeName, cl)
 		{
 			@Override
-			public T parse(String[] tokens, ScajlVariable[] vars, int off, Script ctx)
+			public T parse(String[] tokens, ScajlVariable[] vars, int off, Scajl ctx)
 			{
 				if (!(vars[off] instanceof SVJavObj))
 					return null;
@@ -113,7 +113,7 @@ public class ScriptObject<T>
 	{
 		Command cmd = new Command(name, ret, desc, args);
 		if (memberCmds.put(name, cmd) != null)
-			throw new IllegalArgumentException("Cannot register two commands to the same name in the same type: " + typeName + Script.MEMBER_ACCESS + name);
+			throw new IllegalArgumentException("Cannot register two commands to the same name in the same type: " + typeName + Scajl.MEMBER_ACCESS + name);
 		return cmd;
 	}
 	
@@ -169,7 +169,7 @@ public class ScriptObject<T>
 	
 	public String getInfoString()
 	{
-		String inf = (ScajlClone.isSC(cmdArg.cls) ? Script.RAW_CONTENTS : "") + getTypeName() + " | Inline formats: ";
+		String inf = (ScajlClone.isSC(cmdArg.cls) ? Scajl.RAW_CONTENTS : "") + getTypeName() + " | Inline formats: ";
 		CmdArg<?>[] inline = CmdArg.ARGS.get(cmdArg.cls).values().toArray(new CmdArg<?>[0]);
 		inf += inline.length > 0 ? StringUtils.toString(inline, (arg) -> arg.getInfoString(), "'", "', '", "'") : "None";
 		inf += ", Desc: " + this.getDescription();
@@ -217,7 +217,7 @@ public class ScriptObject<T>
 			Class<?> sup = cmdArg.cls.getSuperclass();
 			while (sup != null)
 			{
-				ScriptObject<?> supSO = Script.getType(sup);
+				ScriptObject<?> supSO = Scajl.getType(sup);
 				if (supSO != null)
 					return supSO.getMemberCmd(name);
 				else

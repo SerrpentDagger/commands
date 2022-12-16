@@ -23,7 +23,7 @@ import utilities.StringUtils;
 
 public abstract class ScajlVariable
 {
-	public static final SVVal NULL = new SVVal(Script.NULL, null);
+	public static final SVVal NULL = new SVVal(Scajl.NULL, null);
 	
 	///////////////////////////
 	
@@ -39,27 +39,27 @@ public abstract class ScajlVariable
 	
 	public abstract String type();
 	
-	public abstract String val(Script ctx);
-	public abstract ScajlVariable eval(Script ctx);
+	public abstract String val(Scajl ctx);
+	public abstract ScajlVariable eval(Scajl ctx);
 	public abstract String raw();
 	@Override
 	public abstract boolean equals(Object other);
-	public VarCtx varCtx(String[] memberAccess, int off, boolean put, Script ctx)
+	public VarCtx varCtx(String[] memberAccess, int off, boolean put, Scajl ctx)
 	{
 		if (off < memberAccess.length)
 		{
 			String val = getVar(memberAccess[off], false, ctx, selfCtx.get()).val(ctx);
-			if (val.equals(Script.ARR_SELF))
+			if (val.equals(Scajl.ARR_SELF))
 				return selfCtx(memberAccess, off, put, ctx);
 		}
 		if (put || memberAccess != null && off != memberAccess.length)
-			ctx.parseExcept("Invalid member access", "The attempted access is not recognized on the value '" + raw() + "' of type: " + type(), "From access: " + StringUtils.toString(memberAccess, "", "" + Script.ARR_ACCESS, ""));
+			ctx.parseExcept("Invalid member access", "The attempted access is not recognized on the value '" + raw() + "' of type: " + type(), "From access: " + StringUtils.toString(memberAccess, "", "" + Scajl.ARR_ACCESS, ""));
 		return new VarCtx(() -> this);
 	}
-	protected VarCtx selfCtx(String[] memberAccess, int off, boolean put, Script ctx)
+	protected VarCtx selfCtx(String[] memberAccess, int off, boolean put, Scajl ctx)
 	{
 		if (put && off == memberAccess.length - 1)
-			ctx.parseExcept("Invalid index: " + Script.ARR_SELF, "Cannot set the '" + Script.ARR_SELF + "' value of a variable directly");
+			ctx.parseExcept("Invalid index: " + Scajl.ARR_SELF, "Cannot set the '" + Scajl.ARR_SELF + "' value of a variable directly");
 		else
 		{
 			SVMember self = selfCtx.get();
@@ -68,7 +68,7 @@ public abstract class ScajlVariable
 				if (off == memberAccess.length - 1)
 					return NULL.varCtx(memberAccess, off, put, ctx);
 				else
-					ctx.parseExcept("Invalid usage of the '%s' keyword.".formatted(Script.ARR_SELF), "The indexed variable is not contained.");
+					ctx.parseExcept("Invalid usage of the '%s' keyword.".formatted(Scajl.ARR_SELF), "The indexed variable is not contained.");
 			}
 			return self.varCtx(memberAccess, off + 1, put, ctx);
 		}
@@ -79,8 +79,8 @@ public abstract class ScajlVariable
 		this.selfCtx = new WeakReference<SVMember>(selfCtx);
 		return this;
 	}
-	public abstract boolean test(ScajlVariable other, Script ctx);
-	public abstract ScajlVariable enforce(ScajlVariable other, Script ctx);
+	public abstract boolean test(ScajlVariable other, Scajl ctx);
+	public abstract ScajlVariable enforce(ScajlVariable other, Scajl ctx);
 	
 	@Override
 	public String toString()
@@ -117,17 +117,17 @@ public abstract class ScajlVariable
 		@Override
 		public String type()
 		{
-			return Script.VALUE;
+			return Scajl.VALUE;
 		}
 		
 		@Override
-		public String val(Script ctx)
+		public String val(Scajl ctx)
 		{
 			return modless;
 		}
 
 		@Override
-		public ScajlVariable eval(Script ctx)
+		public ScajlVariable eval(Scajl ctx)
 		{
 			return this;
 		}
@@ -139,7 +139,7 @@ public abstract class ScajlVariable
 		}
 		
 		@Override
-		public boolean test(ScajlVariable other, Script ctx)
+		public boolean test(ScajlVariable other, Scajl ctx)
 		{
 			if (modless.equals("null"))
 				if (other instanceof SVVal)
@@ -163,7 +163,7 @@ public abstract class ScajlVariable
 		}
 		
 		@Override
-		public ScajlVariable enforce(ScajlVariable other, Script ctx)
+		public ScajlVariable enforce(ScajlVariable other, Scajl ctx)
 		{
 			return clone();
 		}
@@ -197,19 +197,19 @@ public abstract class ScajlVariable
 		}
 		
 		@Override
-		public String val(Script ctx)
+		public String val(Scajl ctx)
 		{
 			return val(ctx, new HashSet<>());
 		}
 		
 		@Override
-		public ScajlVariable eval(Script ctx)
+		public ScajlVariable eval(Scajl ctx)
 		{
 			ScajlVariable var = ctx.scope.get(modless);
 			return var == null ? NULL : var;
 		}
 		
-		private String val(Script ctx, HashSet<SVRef> selfReference)
+		private String val(Scajl ctx, HashSet<SVRef> selfReference)
 		{
 			selfReference.add(this);
 			ScajlVariable eval = eval(ctx);
@@ -224,17 +224,17 @@ public abstract class ScajlVariable
 		@Override
 		public String raw()
 		{
-			return Script.REF + modless;
+			return Scajl.REF + modless;
 		}
 		
 		@Override
-		public boolean test(ScajlVariable other, Script ctx)
+		public boolean test(ScajlVariable other, Scajl ctx)
 		{
 			return eval(ctx).test(other, ctx);
 		}
 		
 		@Override
-		public ScajlVariable enforce(ScajlVariable other, Script ctx)
+		public ScajlVariable enforce(ScajlVariable other, Scajl ctx)
 		{
 			return clone();
 		}
@@ -261,23 +261,23 @@ public abstract class ScajlVariable
 		public SVString(String input, String modless, SVMember selfCtx)
 		{
 			super(input, modless, selfCtx);
-			unraw = Script.stringTrim(modless);
+			unraw = Scajl.stringTrim(modless);
 		}
 		
 		@Override
 		public String type()
 		{
-			return Script.STRING;
+			return Scajl.STRING;
 		}
 		
 		@Override
-		public String val(Script ctx)
+		public String val(Scajl ctx)
 		{
 			return unraw;
 		}
 		
 		@Override
-		public ScajlVariable eval(Script ctx)
+		public ScajlVariable eval(Scajl ctx)
 		{
 			return this;
 		}
@@ -285,17 +285,17 @@ public abstract class ScajlVariable
 		@Override
 		public String raw()
 		{
-			return Script.STRING_CHAR + unraw + Script.STRING_CHAR;
+			return Scajl.STRING_CHAR + unraw + Scajl.STRING_CHAR;
 		}
 		
 		@Override
-		public boolean test(ScajlVariable other, Script ctx)
+		public boolean test(ScajlVariable other, Scajl ctx)
 		{
 			return other instanceof SVString;
 		}
 		
 		@Override
-		public ScajlVariable enforce(ScajlVariable other, Script ctx)
+		public ScajlVariable enforce(ScajlVariable other, Scajl ctx)
 		{
 			return clone();
 		}
@@ -337,17 +337,17 @@ public abstract class ScajlVariable
 		@Override
 		public String type()
 		{
-			return Script.OBJECT;
+			return Scajl.OBJECT;
 		}
 		
 		@Override
-		public String val(Script ctx)
+		public String val(Scajl ctx)
 		{
 			return raw();
 		}
 		
 		@Override
-		public ScajlVariable eval(Script ctx)
+		public ScajlVariable eval(Scajl ctx)
 		{
 			return this;
 		}
@@ -355,39 +355,39 @@ public abstract class ScajlVariable
 		@Override
 		public String raw()
 		{
-			return StringUtils.toString(value, (o) -> o == null ? Script.NULL : o.toString(), "", " | ", "");
+			return StringUtils.toString(value, (o) -> o == null ? Scajl.NULL : o.toString(), "", " | ", "");
 		}
 
 		@Override
-		public VarCtx varCtx(String[] memberAccess, int off, boolean put, Script ctx)
+		public VarCtx varCtx(String[] memberAccess, int off, boolean put, Scajl ctx)
 		{
 			boolean last = off == memberAccess.length - 1;
-			if (last && getVar(memberAccess[off], false, ctx).val(ctx).equals(Script.ARR_LEN))
+			if (last && getVar(memberAccess[off], false, ctx).val(ctx).equals(Scajl.ARR_LEN))
 			{
 				if (put)
-					ctx.parseExcept("Invalid member access", "Cannot set the '%s' value of an Object directly".formatted(Script.ARR_LEN));
+					ctx.parseExcept("Invalid member access", "Cannot set the '%s' value of an Object directly".formatted(Scajl.ARR_LEN));
 				return new VarCtx(() -> typeCount);
 			}
 			else if (off < memberAccess.length)
 			{
-				String[] split = Script.objCallOf(memberAccess[off]);
+				String[] split = Scajl.objCallOf(memberAccess[off]);
 				if (split.length == 2)
 				{
-					if (!split[1].endsWith("" + Script.TOK_E))
+					if (!split[1].endsWith("" + Scajl.TOK_E))
 						ctx.parseExcept("Unfinished delimiter", "The indexed Object is missing a closing parenthesis");
 					String name = getVar(split[0], true, ctx).val(ctx);
 					String namePref = null;
 					for (Object val : value)
 					{
 						Class<?> cl = val.getClass();
-						ScriptObject<?> type = Script.getType(cl);
+						ScriptObject<?> type = Scajl.getType(cl);
 						if (type == null)
 							throw new IllegalStateException("A non-Scajl-exposed Object type has been stored in a Scajl variable: " + cl.getCanonicalName());
 						if (type.getMemberCmd(name) != null)
 						{
 							namePref = type.getTypeName();
 							ctx.putVar("OBJ", this);
-							ctx.runExecutable(namePref + Script.ARR_ACCESS + name + " OBJ" + (split[1].length() > 1 ? ", " : "") + split[1].substring(0, split[1].length() - 1), null);
+							ctx.runExecutable(namePref + Scajl.ARR_ACCESS + name + " OBJ" + (split[1].length() > 1 ? ", " : "") + split[1].substring(0, split[1].length() - 1), null);
 							return ctx.prev().varCtx(memberAccess, off + 1, put, ctx);
 						}
 					}
@@ -398,7 +398,7 @@ public abstract class ScajlVariable
 		}
 		
 		@Override
-		public boolean test(ScajlVariable other, Script ctx)
+		public boolean test(ScajlVariable other, Scajl ctx)
 		{
 			if (!(other instanceof SVJavObj))
 				return false;
@@ -407,7 +407,7 @@ public abstract class ScajlVariable
 		}
 		
 		@Override
-		public ScajlVariable enforce(ScajlVariable other, Script ctx)
+		public ScajlVariable enforce(ScajlVariable other, Scajl ctx)
 		{
 			if (!(other instanceof SVJavObj))
 				return clone();
@@ -461,36 +461,36 @@ public abstract class ScajlVariable
 		}
 		
 		@Override
-		public String val(Script ctx)
+		public String val(Scajl ctx)
 		{
 			return raw();
 		}
 		
 		@Override
-		public ScajlVariable eval(Script ctx)
+		public ScajlVariable eval(Scajl ctx)
 		{
 			return this;
 		}
 		
 		@Override
-		public VarCtx varCtx(String[] memberAccess, int off, boolean put, Script ctx)
+		public VarCtx varCtx(String[] memberAccess, int off, boolean put, Scajl ctx)
 		{
 			SVMember self = selfCtx.get();
-			if (memberAccess[off].equals(Script.ARR_SELF))
+			if (memberAccess[off].equals(Scajl.ARR_SELF))
 			{
 				if (off == memberAccess.length - 1)
 				{
 					if (put)
-						ctx.parseExcept("Invalid index: " + Script.ARR_SELF, "Cannot set the '" + Script.ARR_SELF + "' value of a variable directly");
+						ctx.parseExcept("Invalid index: " + Scajl.ARR_SELF, "Cannot set the '" + Scajl.ARR_SELF + "' value of a variable directly");
 					return new VarCtx(() -> self);
 				}
 				else
 					return self.varCtx(memberAccess, off + 1, put, ctx);
 			}
-			else if (memberAccess[off].equals(Script.ARR_DIMS))
+			else if (memberAccess[off].equals(Scajl.ARR_DIMS))
 			{
 				if (off == memberAccess.length - 1)
-					return new VarCtx(() -> Script.numOf(dimensions()));
+					return new VarCtx(() -> Scajl.numOf(dimensions()));
 			}
 			else if (hasAcc(memberAccess[off]))
 				return memCtx(memberAccess, off, memberAccess[off], put, ctx);				
@@ -548,21 +548,21 @@ public abstract class ScajlVariable
 		}
 		protected abstract String raw(HashSet<SVMember> selfReference);
 		protected abstract boolean hasAcc(String acc);
-		protected abstract VarCtx memCtx(String[] memberAccess, int off, String accVal, boolean put, Script ctx);
+		protected abstract VarCtx memCtx(String[] memberAccess, int off, String accVal, boolean put, Scajl ctx);
 	}
 	
 	public static class SVMap extends SVMember
 	{
 		private LinkedHashMap<String, ScajlVariable> map;
 		
-		public SVMap(String input, String modless, Script ctx, SVMember selfCtx)
+		public SVMap(String input, String modless, Scajl ctx, SVMember selfCtx)
 		{
 			super(input, modless, selfCtx);
-			String[] elements = Script.arrayElementsOf(modless);
+			String[] elements = Scajl.arrayElementsOf(modless);
 			map = new LinkedHashMap<>(elements.length);
 			for (int i = 0; i < elements.length; i++)
 			{
-				String[] keyVal = Script.syntaxedSplit(elements[i], Script.MAP_KEY_EQ);
+				String[] keyVal = Scajl.syntaxedSplit(elements[i], Scajl.MAP_KEY_EQ);
 				if (keyVal.length == 0)
 					continue;
 				String key = getVar(keyVal[0], true, ctx, this).val(ctx);
@@ -584,15 +584,15 @@ public abstract class ScajlVariable
 		@Override
 		protected boolean hasAcc(String acc)
 		{
-			return acc.equals(Script.ARR_LEN) || map.containsKey(acc);
+			return acc.equals(Scajl.ARR_LEN) || map.containsKey(acc);
 		}
 		
 		@Override
-		public VarCtx memCtx(String[] memberAccess, int off, String accVal, boolean put, Script ctx)
+		public VarCtx memCtx(String[] memberAccess, int off, String accVal, boolean put, Scajl ctx)
 		{
 			if (off == memberAccess.length - 1)
 			{
-				if (accVal.equals(Script.ARR_LEN))
+				if (accVal.equals(Scajl.ARR_LEN))
 					return new VarCtx(() -> new SVVal(map.size(), this));
 				else
 					return new VarCtx(() ->
@@ -607,7 +607,7 @@ public abstract class ScajlVariable
 					});
 			}
 			if (!map.containsKey(accVal))
-				ctx.parseExcept("Invalid Map key for continued indexing: " + accVal, "The specified key is missing.", "From access: " + StringUtils.toString(memberAccess, "", "" + Script.ARR_ACCESS, ""));
+				ctx.parseExcept("Invalid Map key for continued indexing: " + accVal, "The specified key is missing.", "From access: " + StringUtils.toString(memberAccess, "", "" + Scajl.ARR_ACCESS, ""));
 			return map.get(accVal).varCtx(memberAccess, off + 1, put, ctx);
 		}
 		
@@ -627,7 +627,7 @@ public abstract class ScajlVariable
 		@Override
 		public String raw(HashSet<SVMember> selfReference)
 		{
-			String out = "" + Script.ARR_S;
+			String out = "" + Scajl.ARR_S;
 			boolean remove = selfReference.add(this);
 			Iterator<Entry<String, ScajlVariable>> it = map.entrySet().iterator();
 			while (it.hasNext())
@@ -635,18 +635,18 @@ public abstract class ScajlVariable
 				Entry<String, ScajlVariable> ent = it.next();
 				ScajlVariable val = ent.getValue();
 				boolean sRef = selfReference.contains(val);
-				out += ent.getKey() + Script.MAP_KEY_EQ + (sRef ? sRef(val) : 
+				out += ent.getKey() + Scajl.MAP_KEY_EQ + (sRef ? sRef(val) : 
 								(val instanceof SVMember ? ((SVMember) val).raw(selfReference) :
 										val.raw()))
-						+ (it.hasNext() ? Script.ARR_SEP + " " : "");
+						+ (it.hasNext() ? Scajl.ARR_SEP + " " : "");
 			}
 			if (remove)
 				selfReference.remove(this);
-			return out + Script.ARR_E;
+			return out + Scajl.ARR_E;
 		}
 
 		@Override
-		public boolean test(ScajlVariable other, Script ctx)
+		public boolean test(ScajlVariable other, Scajl ctx)
 		{
 			if (!(other instanceof SVMap))
 				return false;
@@ -663,7 +663,7 @@ public abstract class ScajlVariable
 		}
 		
 		@Override
-		public ScajlVariable enforce(ScajlVariable other, Script ctx)
+		public ScajlVariable enforce(ScajlVariable other, Scajl ctx)
 		{
 			if (!(other instanceof SVMap))
 				return clone();
@@ -733,10 +733,10 @@ public abstract class ScajlVariable
 	{
 		private ScajlVariable[] array;
 
-		public SVTokGroup(String input, String modless, Script ctx, SVMember selfCtx)
+		public SVTokGroup(String input, String modless, Scajl ctx, SVMember selfCtx)
 		{
 			super(input, modless, selfCtx);
-			String[] elements = Script.tokensOf(Script.unpack(modless));
+			String[] elements = Scajl.tokensOf(Scajl.unpack(modless));
 			array = new ScajlVariable[elements.length];
 			for (int i = 0; i < elements.length; i++)
 				array[i] = getVar(elements[i], false, ctx);
@@ -757,7 +757,7 @@ public abstract class ScajlVariable
 		public String raw(HashSet<SVMember> selfReference)
 		{
 			boolean remove = selfReference.add(this);
-			String out = "" + Script.TOK_S;
+			String out = "" + Scajl.TOK_S;
 			for (int i = 0; i < array.length; i++)
 				out += (selfReference.contains(array[i]) ? sRef(array[i]) :
 								(array[i] instanceof SVMember ? ((SVMember) array[i]).raw(selfReference)
@@ -765,7 +765,7 @@ public abstract class ScajlVariable
 						+ (i == array.length - 1 ? "" : " ");
 			if (remove)
 				selfReference.remove(this);
-			return out + Script.TOK_E;
+			return out + Scajl.TOK_E;
 		}
 		
 		@Override
@@ -798,13 +798,13 @@ public abstract class ScajlVariable
 		}
 		
 		@Override
-		public VarCtx memCtx(String[] memberAccess, int off, String accVal, boolean put, Script ctx)
+		public VarCtx memCtx(String[] memberAccess, int off, String accVal, boolean put, Scajl ctx)
 		{
 			String val = getVar(memberAccess[off], false, ctx, selfCtx.get()).val(ctx);
-			if (val.equals(Script.ARR_SELF))
+			if (val.equals(Scajl.ARR_SELF))
 				return selfCtx(memberAccess, off, put, ctx);
 			if (put || memberAccess != null && off != memberAccess.length)
-				ctx.parseExcept("Invalid member access on Token Group", "The indexed variable is not a type which can be indexed.", "From access: " + StringUtils.toString(memberAccess, "", "" + Script.ARR_ACCESS, ""));
+				ctx.parseExcept("Invalid member access on Token Group", "The indexed variable is not a type which can be indexed.", "From access: " + StringUtils.toString(memberAccess, "", "" + Scajl.ARR_ACCESS, ""));
 			return new VarCtx(() -> this);
 		}
 		
@@ -821,13 +821,13 @@ public abstract class ScajlVariable
 		}
 		
 		@Override
-		public boolean test(ScajlVariable other, Script ctx)
+		public boolean test(ScajlVariable other, Scajl ctx)
 		{
 			return false;
 		}
 		
 		@Override
-		public ScajlVariable enforce(ScajlVariable other, Script ctx)
+		public ScajlVariable enforce(ScajlVariable other, Scajl ctx)
 		{
 			if (!(other instanceof SVTokGroup))
 				return clone();
@@ -860,10 +860,10 @@ public abstract class ScajlVariable
 		private SVVal length;
 		public final boolean noUnpack;
 		
-		public SVArray(String input, String modless, boolean noUnpack, Script ctx, SVMember selfCtx)
+		public SVArray(String input, String modless, boolean noUnpack, Scajl ctx, SVMember selfCtx)
 		{
 			super(input, modless, selfCtx);
-			String[] elements = Script.arrayElementsOf(modless);
+			String[] elements = Scajl.arrayElementsOf(modless);
 			array = new ScajlVariable[elements.length];
 			Arrays.fill(array, NULL);
 			for (int i = 0; i < elements.length; i++)
@@ -895,27 +895,27 @@ public abstract class ScajlVariable
 		public String raw(HashSet<SVMember> selfReference)
 		{
 			boolean remove = selfReference.add(this);
-			String out = "" + Script.ARR_S;
+			String out = "" + Scajl.ARR_S;
 			for (int i = 0; i < array.length; i++)
 				out += (selfReference.contains(array[i]) ? sRef(array[i]) : 
 								(array[i] instanceof SVMember ? ((SVMember) array[i]).raw(selfReference)
 										: array[i].raw()))
-						+ (i == array.length - 1 ? "" : Script.ARR_SEP + " ");
+						+ (i == array.length - 1 ? "" : Scajl.ARR_SEP + " ");
 			if (remove)
 				selfReference.remove(this);
-			return out + Script.ARR_E;
+			return out + Scajl.ARR_E;
 		}
 		
 		@Override
 		protected boolean hasAcc(String acc)
 		{
-			return acc.equals(Script.ARR_LEN);
+			return acc.equals(Scajl.ARR_LEN);
 		}
 		
 		@Override
-		public VarCtx memCtx(String[] memberAccess, int off, String accVal, boolean put, Script ctx)
+		public VarCtx memCtx(String[] memberAccess, int off, String accVal, boolean put, Scajl ctx)
 		{
-			if (accVal.equals(Script.ARR_LEN) && off == memberAccess.length - 1)
+			if (accVal.equals(Scajl.ARR_LEN) && off == memberAccess.length - 1)
 				return new VarCtx(() -> length, (var) ->
 				{
 					Integer len = CmdArg.INT.parse(var.val(ctx));
@@ -927,11 +927,11 @@ public abstract class ScajlVariable
 			{
 				Integer ind = CmdArg.INT.parse(accVal);
 				if (ind == null)
-					ctx.parseExcept("Invalid Array index: " + accVal, "Array indices must be numbers.", "From access: " + StringUtils.toString(memberAccess, "", "" + Script.ARR_ACCESS, ""));
+					ctx.parseExcept("Invalid Array index: " + accVal, "Array indices must be numbers.", "From access: " + StringUtils.toString(memberAccess, "", "" + Scajl.ARR_ACCESS, ""));
 				if (ind < 0)
 					ind = array.length + ind;
 				if (ind >= array.length || ind < 0)
-					ctx.parseExcept("Invalid Array index: " + ind, "Index out of bounds.", "From access: " + StringUtils.toString(memberAccess, "", "" + Script.ARR_ACCESS, ""));
+					ctx.parseExcept("Invalid Array index: " + ind, "Index out of bounds.", "From access: " + StringUtils.toString(memberAccess, "", "" + Scajl.ARR_ACCESS, ""));
 				final int iind = ind;
 				if (off == memberAccess.length - 1)
 					return new VarCtx(() -> array[iind], (var) ->
@@ -972,7 +972,7 @@ public abstract class ScajlVariable
 		}
 		
 		@Override
-		public boolean test(ScajlVariable other, Script ctx)
+		public boolean test(ScajlVariable other, Scajl ctx)
 		{
 			if (!(other instanceof SVArray))
 				return false;
@@ -986,7 +986,7 @@ public abstract class ScajlVariable
 		}
 		
 		@Override
-		public ScajlVariable enforce(ScajlVariable other, Script ctx)
+		public ScajlVariable enforce(ScajlVariable other, Scajl ctx)
 		{
 			if (!(other instanceof SVArray))
 				return clone();
@@ -1062,13 +1062,13 @@ public abstract class ScajlVariable
 		}
 
 		@Override
-		public String val(Script ctx)
+		public String val(Scajl ctx)
 		{
 			return eval(ctx).val(ctx);
 		}
 		
 		@Override
-		public ScajlVariable eval(Script ctx)
+		public ScajlVariable eval(Scajl ctx)
 		{
 			return ctx.runExecutable(modless, selfCtx.get()).output;
 		}
@@ -1076,17 +1076,17 @@ public abstract class ScajlVariable
 		@Override
 		public String raw()
 		{
-			return Script.REF + modless;
+			return Scajl.REF + modless;
 		}
 
 		@Override
-		public boolean test(ScajlVariable other, Script ctx)
+		public boolean test(ScajlVariable other, Scajl ctx)
 		{
 			return other instanceof SVExec;
 		}
 		
 		@Override
-		public ScajlVariable enforce(ScajlVariable other, Script ctx)
+		public ScajlVariable enforce(ScajlVariable other, Scajl ctx)
 		{
 			return clone();
 		}
@@ -1108,13 +1108,13 @@ public abstract class ScajlVariable
 	
 	////////////////////////
 	
-	public static void putVar(String name, ScajlVariable var, Script ctx)
+	public static void putVar(String name, ScajlVariable var, Scajl ctx)
 	{
 		putVar(name, var, ctx, null);
 	}
-	public static void putVar(String name, ScajlVariable var, Script ctx, SVMember selfCtx)
+	public static void putVar(String name, ScajlVariable var, Scajl ctx, SVMember selfCtx)
 	{
-		String[] arrAcc = Script.syntaxedSplit(name, "" + Script.ARR_ACCESS);
+		String[] arrAcc = Scajl.syntaxedSplit(name, "" + Scajl.ARR_ACCESS);
 		ScajlVariable toVar = getVar(arrAcc[0], arrAcc.length == 1, ctx);
 		if (arrAcc.length > 1)
 		{
@@ -1136,7 +1136,7 @@ public abstract class ScajlVariable
 		else
 		{
 			name = toVar.input;
-			if (Script.ILLEGAL_VAR_MATCHER.matcher(name).matches())
+			if (Scajl.ILLEGAL_VAR_MATCHER.matcher(name).matches())
 				ctx.parseExcept("Illegal characters in variable name", name);
 			try
 			{
@@ -1149,12 +1149,12 @@ public abstract class ScajlVariable
 		}
 	}
 	
-	public static boolean isVar(String input, Script ctx)
+	public static boolean isVar(String input, Scajl ctx)
 	{
-		if (input.equals(Script.NULL))
+		if (input.equals(Scajl.NULL))
 			return false;
 		
-		MixedPair<boolean[], String> modPair = Script.prefixModsFrom(input, Script.VALID_VAR_MODS);
+		MixedPair<boolean[], String> modPair = Scajl.prefixModsFrom(input, Scajl.VALID_VAR_MODS);
 		String modless = modPair.b();
 		boolean[] mods = modPair.a();
 		if (mods[1])
@@ -1163,12 +1163,12 @@ public abstract class ScajlVariable
 		return var != null;
 	}
 	
-	public static Object[] preParse(String token, Script ctx)
+	public static Object[] preParse(String token, Scajl ctx)
 	{
 		return preParse(new String[] { token }, ctx);
 	}
 	
-	public static Object[] preParse(String[] tokens, Script ctx)
+	public static Object[] preParse(String[] tokens, Scajl ctx)
 	{
 		Ind ind = new Ind(0);
 		Object[] out = new Object[tokens.length];
@@ -1176,7 +1176,7 @@ public abstract class ScajlVariable
 		for (int i = 0; i < out.length; i = ind.get())
 		{
 			String str;
-			if (out[i] instanceof String && (str = (String) out[i]).charAt(0) == Script.UNPACK)
+			if (out[i] instanceof String && (str = (String) out[i]).charAt(0) == Scajl.UNPACK)
 			{
 				ScajlVariable unp = getVar(str.substring(1), false, ctx).eval(ctx);
 				if (unp instanceof SVTokGroup)
@@ -1193,19 +1193,19 @@ public abstract class ScajlVariable
 		return out;
 	}
 	
-	public static ScajlVariable getVar(String input, boolean rawDef, Script ctx)
+	public static ScajlVariable getVar(String input, boolean rawDef, Scajl ctx)
 	{
 		return getVar(input, rawDef, ctx, null);
 	}
-	public static ScajlVariable getVar(String input, boolean rawDef, Script ctx, SVMember selfCtx)
+	public static ScajlVariable getVar(String input, boolean rawDef, Scajl ctx, SVMember selfCtx)
 	{
-		if (input.equals(Script.NULL))
+		if (input.equals(Scajl.NULL))
 			return NULL;
 		
 		boolean isNumber = CmdArg.DOUBLE.parse(input) != null;
 		if (isNumber)
 			return new SVVal(input, selfCtx);
-		MixedPair<boolean[], String> modPair = Script.prefixModsFrom(input, Script.VALID_VAR_MODS);
+		MixedPair<boolean[], String> modPair = Scajl.prefixModsFrom(input, Scajl.VALID_VAR_MODS);
 		String modless = modPair.b();
 		boolean[] mods = modPair.a();
 		boolean isUnraw = mods[0];
@@ -1218,10 +1218,10 @@ public abstract class ScajlVariable
 			ctx.parseExcept("Illegal reference modifier", "The 'unpack' reference modifier is disallowed for this location", "From input: " + input);
 		int modCount = countTrues(mods);
 		if (modCount > 1 && !(noUnpack && isRawCont))
-			ctx.parseExcept("Invalid variable usage", "A maximum of 1 reference modifier is allowed per token, except for the '" + Script.NO_UNPACK + Script.RAW_CONTENTS + "' combination applied to an Array variable.", "From input: " + input);
+			ctx.parseExcept("Invalid variable usage", "A maximum of 1 reference modifier is allowed per token, except for the '" + Scajl.NO_UNPACK + Scajl.RAW_CONTENTS + "' combination applied to an Array variable.", "From input: " + input);
 		if (!isRaw)
 		{
-			String[] arrAcc = Script.syntaxedSplit(input, "" + Script.ARR_ACCESS);
+			String[] arrAcc = Scajl.syntaxedSplit(input, "" + Scajl.ARR_ACCESS);
 			if (arrAcc.length > 1)
 			{
 				ScajlVariable var = getVar(arrAcc[0], false, ctx, selfCtx);
@@ -1231,11 +1231,11 @@ public abstract class ScajlVariable
 		else
 			return new SVVal(input, modless, selfCtx);
 		
-		boolean isString = modless.startsWith("" + Script.STRING_CHAR);
-		if (isString && !modless.endsWith("" + Script.STRING_CHAR))
+		boolean isString = modless.startsWith("" + Scajl.STRING_CHAR);
+		if (isString && !modless.endsWith("" + Scajl.STRING_CHAR))
 			ctx.parseExcept("Malformed String", "A quoted String must start and end with the '\"' character.", "From input: " + input);
 		boolean isContainer = containerCheck(modless, input, ctx);
-		boolean hasEq = isContainer && Script.syntaxedContains(modless.substring(1), Pattern.quote("" + Script.MAP_KEY_EQ), 1);
+		boolean hasEq = isContainer && Scajl.syntaxedContains(modless.substring(1), Pattern.quote("" + Scajl.MAP_KEY_EQ), 1);
 		boolean isArray = isContainer && !hasEq;
 		if (noUnpack && !(isArray || isRawCont))
 			ctx.parseExcept("Illegal reference modifier", "The \"don't unpack\" modifier is only allowed on Array declarations and clonings.", "From input: " + input);
@@ -1244,16 +1244,16 @@ public abstract class ScajlVariable
 			ctx.parseExcept("Illegal reference modifiers", "The only reference modifier allowed on an Array, Map or String declaration is the \"don't unpack\" modifier placed in front of an Array declaration or cloning", "From input: " + input);
 			//ctx.parseExcept("Invalid value usage", "A quoted String or an Array or Map must start and end with their respective boxing characters.", "From input: " + input);
 			
-		boolean isGroup = modless.startsWith("" + Script.TOK_S);
-		if (isGroup && !modless.endsWith("" + Script.TOK_E))
-			ctx.parseExcept("Malformed Token Group", "A Token Group must start and end with the '" + Script.TOK_S + "' and '" + Script.TOK_E + "' characters, respectively.", "From input: " + input);
+		boolean isGroup = modless.startsWith("" + Scajl.TOK_S);
+		if (isGroup && !modless.endsWith("" + Scajl.TOK_E))
+			ctx.parseExcept("Malformed Token Group", "A Token Group must start and end with the '" + Scajl.TOK_S + "' and '" + Scajl.TOK_E + "' characters, respectively.", "From input: " + input);
 		
-		boolean isExec = modless.startsWith("" + Script.SCOPE_S);
-		if (isExec && !modless.endsWith("" + Script.SCOPE_E))
-			ctx.parseExcept("Malformed Executable", "An Executable must start and end with the '" + Script.SCOPE_S + "' and '" + Script.SCOPE_E + "' characters, respectively.", "From input: " + input);
+		boolean isExec = modless.startsWith("" + Scajl.SCOPE_S);
+		if (isExec && !modless.endsWith("" + Scajl.SCOPE_E))
+			ctx.parseExcept("Malformed Executable", "An Executable must start and end with the '" + Scajl.SCOPE_S + "' and '" + Scajl.SCOPE_E + "' characters, respectively.", "From input: " + input);
 		
 		if (isExec && (isRaw || isRawCont || isUnraw))
-			ctx.parseExcept("Invalid executable modifier", "An Executable can only be modified with the 'lookup' reference modifier '" + Script.REF + "'", "From input: " + input);
+			ctx.parseExcept("Invalid executable modifier", "An Executable can only be modified with the 'lookup' reference modifier '" + Scajl.REF + "'", "From input: " + input);
 		
 		if (isExec && !isRef)
 			return ctx.runExecutable(modless, selfCtx).output;
@@ -1270,11 +1270,11 @@ public abstract class ScajlVariable
 		{
 			if (isExec)
 				return new SVExec(input, modless, selfCtx);
-			if (Script.ILLEGAL_VAR_MATCHER.matcher(modless).matches())
+			if (Scajl.ILLEGAL_VAR_MATCHER.matcher(modless).matches())
 				ctx.parseExcept("Illegal characters in reference name", "The reference name must be a legal variable name", "From input: " + input);
 			return new SVRef(input, modless);
 		}
-		if (modless.equals(Script.ARR_SELF))
+		if (modless.equals(Scajl.ARR_SELF))
 			return selfCtx == null ? NULL : selfCtx;
 				//ctx.parseExcept("Illegal usage of the '%s' keyword.".formatted(Script.ARR_SELF), "'%s' can only be used within Container types", "From input: " + input);
 		
@@ -1286,15 +1286,15 @@ public abstract class ScajlVariable
 		return var;
 	}
 	
-	private static boolean containerCheck(String modless, String input, Script ctx)
+	private static boolean containerCheck(String modless, String input, Scajl ctx)
 	{
-		BoxTracker ARRTRACK = Script.ARRTRACK;
-		DelimTracker QTRACK = Script.QTRACK;
-		boolean isContainer = modless.startsWith("" + Script.ARR_S);
+		BoxTracker ARRTRACK = Scajl.ARRTRACK;
+		DelimTracker QTRACK = Scajl.QTRACK;
+		boolean isContainer = modless.startsWith("" + Scajl.ARR_S);
 		if (!isContainer)
 			return false;
-		if (!modless.endsWith("" + Script.ARR_E))
-			ctx.parseExcept("Malformed Container", "An Array or Map must start and end with the '" + Script.ARR_S + "' and '" + Script.ARR_E + "' characters, respectively", "From input: " + input);
+		if (!modless.endsWith("" + Scajl.ARR_E))
+			ctx.parseExcept("Malformed Container", "An Array or Map must start and end with the '" + Scajl.ARR_S + "' and '" + Scajl.ARR_E + "' characters, respectively", "From input: " + input);
 		ARRTRACK.reset();
 		QTRACK.reset();
 		for (int i = 0; i < modless.length() - 1; i++)
@@ -1327,7 +1327,7 @@ public abstract class ScajlVariable
 	
 	private static String sRef(ScajlVariable selfReffed)
 	{
-		return Script.SELF_REF + "-%x".formatted(selfReffed.hashCode()).toUpperCase();
+		return Scajl.SELF_REF + "-%x".formatted(selfReffed.hashCode()).toUpperCase();
 	}
 	
 	///////////////////////////

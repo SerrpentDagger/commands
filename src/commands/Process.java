@@ -14,7 +14,7 @@ public class Process
 		return this;
 	}
 	
-	public void run(Script ctx)
+	public void run(Scajl ctx)
 	{
 		process.forEach((cmd) -> cmd.run(ctx));
 	}

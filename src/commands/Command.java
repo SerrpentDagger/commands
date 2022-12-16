@@ -122,7 +122,7 @@ public class Command
 			inputArgs = input;
 		}
 		
-		public ScajlVariable run(Script ctx)
+		public ScajlVariable run(Scajl ctx)
 		{
 			return cmd.func.cmd(ctx, objs);
 		}
@@ -148,6 +148,6 @@ public class Command
 	@FunctionalInterface
 	public static interface CmdFunc
 	{
-		public ScajlVariable cmd(Script ctx, Object... args);
+		public ScajlVariable cmd(Scajl ctx, Object... args);
 	}
 }

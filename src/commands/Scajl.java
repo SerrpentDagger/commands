@@ -66,12 +66,13 @@ import commands.ScajlVariable.SVVal;
 import commands.Scope.SNode;
 import commands.libs.Bool;
 import commands.libs.BuiltInLibs;
+import commands.libs.Script;
 import jbuilder.JBuilder;
 import mod.serpentdagger.artificialartificing.utils.group.MixedPair;
 import utilities.ArrayUtils;
 import utilities.StringUtils;
 
-public class Script
+public class Scajl
 {
 	private static final LinkedHashMap<String, Command> CMDS = new LinkedHashMap<String, Command>();
 	private static final HashMap<String, ScriptObject<?>> OBJECTS = new HashMap<String, ScriptObject<?>>();
@@ -95,6 +96,7 @@ public class Script
 	
 	public static final String PREVIOUS = "PREV";
 	public static final String PARENT = "PARENT";
+	public static final String IMPORT_LABEL = "IMPORT";
 	public static final String NULL = "null";
 	public static final SVVal NULLV = ScajlVariable.NULL;
 	public static final SVVal FALSE = new SVVal("false", null), TRUE = new SVVal("true", null);
@@ -145,7 +147,7 @@ public class Script
 	protected final Scope scope = new Scope(labelTree);
 	private final ArrayDeque<StackEntry> stack = new ArrayDeque<StackEntry>();
 	private StackEntry popped = null;
-	private Script parent = null;
+	private Scajl parent = null;
 	public String path;
 	public String name = "BASE";
 	public final String[] lines;
@@ -156,7 +158,7 @@ public class Script
 	private Consumer<String> printCallback = (str) -> System.out.println(str);
 	private BiConsumer<String, String> prevCallback = (cmd, prv) -> {};
 	private Consumer<String> errorCallback = (err) -> printCallback.accept(err);
-	private BiConsumer<CommandParseException, String> parseExceptionCallback = (exc, err) -> { exc.printStackTrace(); };
+	private BiConsumer<ScajlException, String> parseExceptionCallback = (exc, err) -> { exc.printStackTrace(); };
 	private Runnable pollEvents = null;
 	private Debugger debugger = (cmd, args, ret) -> {};
 	private Debugger oldDebug = debugger;
@@ -434,7 +436,7 @@ public class Script
 		return Modifier.isPublic(mods)
 				&& !ex.isSynthetic()
 				&& !(ex instanceof AccessibleObject && ((AccessibleObject) ex).isAnnotationPresent(NoExpose.class))
-				&& Script.canAutoExpose(ex, rec);
+				&& Scajl.canAutoExpose(ex, rec);
 	};
 	public static final ClsPredicate SAFE_CLASS_EXPOSE_FILTER = (cl, rec) ->
 	{
@@ -528,7 +530,7 @@ public class Script
 		String desc = descAnn == null ? "Direct exposition of class: " + cl.getCanonicalName() : descAnn.value();
 		
 		ScriptObject<T> so = new ScriptObject<>(name, desc, cl);
-		Script.add(so);
+		Scajl.add(so);
 		so.argOf().reg();
 		Predicate<AnnotatedElement> ifNotExpose = (obj) -> !obj.isAnnotationPresent(Expose.class);
 		if (recursive)
@@ -557,9 +559,9 @@ public class Script
 			meths = (Method[]) ArrayUtils.removeIf(meths, ifNotExpose);
 			fields = (Field[]) ArrayUtils.removeIf(fields, ifNotExpose);
 		}
-		Script.exposeAll(consts, so, memberIf, classIf, recursive);
-		Script.exposeAll(meths, so, memberIf, classIf, recursive);
-		Script.exposeAll(fields, so, memberIf, classIf, recursive);
+		Scajl.exposeAll(consts, so, memberIf, classIf, recursive);
+		Scajl.exposeAll(meths, so, memberIf, classIf, recursive);
+		Scajl.exposeAll(fields, so, memberIf, classIf, recursive);
 
 		return so;
 	}
@@ -900,7 +902,7 @@ public class Script
 	}).setVarArgs();
 	public static final Command GET_PARENT = add("get_parent", STRING, "Returns the name of the parent script # levels up, where 0 would target this script.", CmdArg.INT).setFunc((ctx, objs) ->
 	{
-		Script p = ctx;
+		Scajl p = ctx;
 		int count = (Integer) objs[0];
 		for (int i = 0; i < count; i++)
 		{
@@ -1183,25 +1185,25 @@ public class Script
 			return ctx.prev();
 		else if (outA.length == 1)
 			return outA[0];
-		return Script.arrOf(outA);
+		return Scajl.arrOf(outA);
 	}).setVarArgs();
-	public static final Command RUN_SCRIPT = add("run_script", Script.VOID, "Runs the given script. Booleans determine whether variables in this script will be given to other before being run, and whether variables in other will be pulled to this script once finished.", CmdArg.STRING, CmdArg.BOOLEAN, CmdArg.BOOLEAN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
+	public static final Command RUN_SCRIPT = add("run_script", Scajl.VOID, "Runs the given script. Booleans determine whether variables in this script will be given to other before being run, and whether variables in other will be pulled to this script once finished.", CmdArg.STRING, CmdArg.BOOLEAN, CmdArg.BOOLEAN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
 	{
 		String name = (String) objs[0];
 		File scr = getScriptFile(name);
 		if (scr == null)
 			ctx.parseExcept("Specified script does not exist", name);
 		
-		Script script;
+		Scajl script;
 		ScajlVariable out = ctx.prev();
 		try
 		{
-			script = new Script(scr);
+			script = new Scajl(scr);
 			ctx.transferCallbacks(script);
 			if ((boolean) objs[1])
 				script.integrateVarsFrom(ctx);
 			
-			script.putVar(Script.PARENT, valOf(ctx.name));
+			script.putVar(Scajl.PARENT, valOf(ctx.name));
 			script.name = name;
 			script.run((VarSet[]) objs[3]);
 			
@@ -1220,18 +1222,18 @@ public class Script
 	{
 		return new Object[] { objs[0], false, false, objs[1] };
 	}, CmdArg.STRING, CmdArg.VAR_SET).setVarArgs();
-	public static final Command RUN_SCRIPT_LABEL = add("run_script_label", Script.VOID, "Runs the given script from the given label. Booleans are the same as those of 'run_script'.", CmdArg.STRING, CmdArg.STRING, CmdArg.BOOLEAN, CmdArg.BOOLEAN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
+	public static final Command RUN_SCRIPT_LABEL = add("run_script_label", Scajl.VOID, "Runs the given script from the given label. Booleans are the same as those of 'run_script'.", CmdArg.STRING, CmdArg.STRING, CmdArg.BOOLEAN, CmdArg.BOOLEAN, CmdArg.VAR_SET).setFunc((ctx, objs) ->
 	{
 		String name = (String) objs[0];
 		File scr = getScriptFile(name);
 		if (scr == null)
 			ctx.parseExcept("Specified script does not exist", name);
 		
-		Script script;
+		Scajl script;
 		ScajlVariable out = ctx.prev();
 		try
 		{
-			script = new Script(scr);
+			script = new Scajl(scr);
 			ctx.transferCallbacks(script);
 			if ((boolean) objs[2])
 				script.integrateVarsFrom(ctx);
@@ -1240,7 +1242,7 @@ public class Script
 			Label lab = script.getLabel(label);
 			if (lab != null)
 			{
-				script.putVar(Script.PARENT, valOf(ctx.name));
+				script.putVar(Scajl.PARENT, valOf(ctx.name));
 				script.name = name;
 				script.runFrom(lab, (VarSet[]) objs[4]);
 				if ((boolean) objs[3])
@@ -1261,6 +1263,15 @@ public class Script
 	{
 		return new Object[] { objs[0], objs[1], false, false, objs[2] };
 	}, CmdArg.STRING, CmdArg.STRING, CmdArg.VAR_SET).setVarArgs();
+	public static final Command IMPSCR = add("impscr", "Script", "Import and return the Script of the given name.", CmdArg.STRING, CmdArg.VAR_SET).setFunc((ctx, objs) ->
+	{
+		String name = (String) objs[0];
+		Script scr = new Script(ctx, name);
+		LabelTree onImp = scr.scajl.labelTree.getFor(IMPORT_LABEL);
+		if (onImp != null)
+			scr.scajl.runFrom(onImp.root, (VarSet[]) objs[1]);
+		return objOf(scr);
+	}).setVarArgs();
 	public static final Command EXIT = add("exit", VOID, "Exits the script runtime.").setFunc((ctx, objs) ->
 	{
 		ctx.forceKill.set(true);
@@ -1391,7 +1402,7 @@ public class Script
 	@FunctionalInterface
 	private static interface KeyFunc
 	{
-		public void key(int key, Script ctx, Object[] objs);
+		public void key(int key, Scajl ctx, Object[] objs);
 	}
 	
 	private static double operate(Object[] numArray, Operator op)
@@ -1420,7 +1431,7 @@ public class Script
 	@FunctionalInterface
 	public static interface UserReqType
 	{
-		public boolean reqType(Script ctx, String[] vars, CmdArg<?> type, String userPromptType);
+		public boolean reqType(Scajl ctx, String[] vars, CmdArg<?> type, String userPromptType);
 	}
 	@FunctionalInterface
 	public static interface Debugger
@@ -2057,7 +2068,7 @@ public class Script
 	
 	public void parseExcept(String preAt, String postLine, String extra)
 	{
-		throw new CommandParseException(getParseExceptString(preAt, postLine, extra));
+		throw new ScajlException(getParseExceptString(preAt, postLine, extra));
 	}
 	
 	////////////////////////////////////////////////
@@ -2074,7 +2085,7 @@ public class Script
 		{
 			try
 			{
-				Script script = new Script(area.getText());
+				Scajl script = new Scajl(area.getText());
 				out[0].setText("");
 				setJBuilderCallbacks(script, out[0]);
 				script.printDebug(true);
@@ -2092,7 +2103,7 @@ public class Script
 		});
 		return build.showFrame().center();
 	}
-	public static void setJBuilderCallbacks(Script script, JTextArea print)
+	public static void setJBuilderCallbacks(Scajl script, JTextArea print)
 	{
 		script.setPrintCallback((str) ->
 		{
@@ -2125,7 +2136,7 @@ public class Script
 			count++;
 		return count;
 	}
-	public static boolean userReqType(Script ctx, String[] vars, CmdArg<?> type, String prompt)
+	public static boolean userReqType(Scajl ctx, String[] vars, CmdArg<?> type, String prompt)
 	{
 		AtomicBoolean bool = new AtomicBoolean(false);
 		while (!bool.get())
@@ -2161,12 +2172,12 @@ public class Script
 		return true;
 	}
 	
-	public Script(String str) throws AWTException
+	public Scajl(String str) throws AWTException
 	{
 		this(new Scanner(str));
 	}
 	
-	public Script(Scanner scan) throws AWTException
+	public Scajl(Scanner scan) throws AWTException
 	{
 		rob = new Robot();
 		rob.setAutoDelay(170);
@@ -2223,12 +2234,12 @@ public class Script
 		}
 		for (int i = 0; i < lines.length; i++)
 			if (!syntaxCheck(lines[i]))
-				throw new CommandParseException("Invalid syntax at line " + (i + 1) + ": " + lines[i] + ". Unfinished delimiter.");
+				throw new ScajlException("Invalid syntax at line " + (i + 1) + ": " + lines[i] + ". Unfinished delimiter.");
 
 		putVar(PARENT, ScajlVariable.NULL);
 	}
 	
-	public Script(File script) throws FileNotFoundException, AWTException
+	public Scajl(File script) throws FileNotFoundException, AWTException
 	{
 		this(new Scanner(script));
 		this.path = script.getAbsolutePath();
@@ -2249,7 +2260,7 @@ public class Script
 			keyIn = new Scanner(System.in);
 			runFrom(GLOBAL, varSets);
 		}
-		catch (CommandParseException e)
+		catch (ScajlException e)
 		{
 			this.parseExceptionCallback.accept(e, e.getMessage());
 		}
@@ -2260,7 +2271,7 @@ public class Script
 		}
 	}
 	private int labelsDeep = 0;
-	protected void runFrom(Label label, VarSet... varSets)
+	public void runFrom(Label label, VarSet... varSets)
 	{
 		pushStack(label);
 		for (VarSet var : varSets)
@@ -2414,7 +2425,7 @@ public class Script
 		return parent.getMemberCmd(head.name);
 	}
 	
-	public void integrateVarsFrom(Script other)
+	public void integrateVarsFrom(Scajl other)
 	{
 		scope.integrateFrom(other.scope);
 	}
@@ -2473,13 +2484,14 @@ public class Script
 		}
 		catch (IllegalStateException e)
 		{
-			throw new CommandParseException("Invalid Label closure at line " + (line - 1) + ". No label to return from. Labels are opened with '--' or '~~'.");
+			throw new ScajlException("Invalid Label closure at line " + (line - 1) + ". No label to return from. Labels are opened with '--' or '~~'.");
 		}
 	}
 	
 	public Label getLabel(String label)
 	{
-		LabelTree tree = stack.peek().to.getFor(label.replaceFirst(LABEL_REG, ""));
+		StackEntry ent = stack.peek();
+		LabelTree tree = ent != null ? ent.to.getFor(label.replaceFirst(LABEL_REG, "")) : labelTree.getFor(label);
 		return tree == null ? null : tree.root;
 	}
 	
@@ -2490,9 +2502,9 @@ public class Script
 	
 	private void pushStack(Label to)
 	{
-		LabelTree toTree = to == GLOBAL ? labelTree : stack.peek().to.getFor(to);
+		LabelTree toTree = to == GLOBAL ? labelTree : (stack.isEmpty() ? labelTree.getFor(to) : stack.peek().to.getFor(to));
 		if (toTree == null)
-			throw new CommandParseException("Attempt to push stack to out-of-scope Label: " + to.name + ", from context: " + stack.peek().to);
+			throw new ScajlException("Attempt to push stack to out-of-scope Label: " + to.name + ", from context: " + stack.peek().to);
 
 		stack.push(new StackEntry(parseLine, toTree));
 		parseLine = to.line + 1;
@@ -2536,7 +2548,7 @@ public class Script
 		this.exceptionCallback = callback;
 	}
 	
-	public void setParseExceptionCallback(BiConsumer<CommandParseException, String> callback)
+	public void setParseExceptionCallback(BiConsumer<ScajlException, String> callback)
 	{
 		this.parseExceptionCallback = callback;
 	}
@@ -2592,7 +2604,7 @@ public class Script
 		return exceptionCallback;
 	}
 	
-	public BiConsumer<CommandParseException, String> getParseExceptionCallback()
+	public BiConsumer<ScajlException, String> getParseExceptionCallback()
 	{
 		return parseExceptionCallback;
 	}
@@ -2612,7 +2624,7 @@ public class Script
 		return debugger;
 	}
 	
-	public void transferCallbacks(Script to)
+	public void transferCallbacks(Scajl to)
 	{
 		to.setPrintCallback(getPrintCallback());
 		to.setErrorCallback(getErrorCallback());
@@ -2626,23 +2638,23 @@ public class Script
 		to.keyIn = keyIn;
 	}
 	
-	public Script setParent(Script parent)
+	public Scajl setParent(Scajl parent)
 	{
 		this.parent = parent;
 		return this;
 	}
 	
-	public Script getParent()
+	public Scajl getParent()
 	{
 		return parent;
 	}
 	
 	//////////////////////
 	
-	public static class CommandParseException extends RuntimeException
+	public static class ScajlException extends RuntimeException
 	{
 		private static final long serialVersionUID = 1L;
-		public CommandParseException(String name)
+		public ScajlException(String name)
 		{
 			super(name);
 		}
