@@ -1091,7 +1091,8 @@ public abstract class ScajlVariable
 					ctx.scope.put(set.name, set.var);
 			}
 			ScajlVariable out = ctx.runExecutable(modless, selfCtx.get()).output;
-			ctx.scope.pop();
+			if (sets != null)
+				ctx.scope.pop();
 			return out;
 		}
 

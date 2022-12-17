@@ -1524,7 +1524,7 @@ public class Scajl
 			if (!(multilineComment = MCOMTRACK.inside() || MCOMTRACK.wasInside()))
 			{
 				if (LCOMTRACK.inside())
-					return str.substring(0, str.length() - 1);
+					return str.substring(0, str.length() - 1).trim();
 				str += parse;
 			}
 			else if (!MCOMTRACK.wasInside())
@@ -2301,7 +2301,7 @@ public class Scajl
 					if (line.equals(HELP_CHAR_STR))
 						PRINT_COMMANDS.func.cmd(this, (Object[]) null);
 					else if (startsWith(line, SCOPE_S) && LEGAL_ANON_SCOPE_MATCHER.matcher(line).matches())
-						scope.push(labelTree.getFor(anonScope.get(parseLine)));
+						scope.push(scope.getLast().getLabelTree().getFor(anonScope.get(parseLine)));
 					else if (endsWith(line, SCOPE_E) && LEGAL_ANON_SCOPE_MATCHER.matcher(line).matches())
 						scope.pop();
 					else

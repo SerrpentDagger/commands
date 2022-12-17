@@ -83,6 +83,11 @@ public class Scope
 		stack.add(last = new SNode(last, to));
 	}
 	
+	public void push(SNode to)
+	{
+		stack.add(last = to);
+	}
+	
 	public void push()
 	{
 		push(last.label);
