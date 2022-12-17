@@ -59,6 +59,7 @@ import commands.ParseTracker.MultiTracker;
 import commands.ParseTracker.RepeatTracker;
 import commands.ParseTracker.WrapTracker;
 import commands.ScajlVariable.SVArray;
+import commands.ScajlVariable.SVExec;
 import commands.ScajlVariable.SVJavObj;
 import commands.ScajlVariable.SVMember;
 import commands.ScajlVariable.SVString;
@@ -108,7 +109,7 @@ public class Scajl
 	public static final char ARR_S = '[', ARR_E = ']', ARR_ACCESS = '.', ARR_SEP = ';';
 	public static final char TOK_S = '(', TOK_E = ')', SCOPE_S = '{', SCOPE_E = '}';
 	public static final char MAP_KEY_EQ = '=';
-	public static final String ARR_LEN = "len", ARR_SELF = "up", ARR_DIMS = "dims";
+	public static final String ARR_LEN = "len", ARR_UP = "up", ARR_DIMS = "dims";
 	public static final char STRING_CHAR = '"';
 	public static final char ESCAPE_CHAR = '\\';
 	public static final char HELP_CHAR = '?';
@@ -1136,6 +1137,12 @@ public class Scajl
 		return ctx.prev();
 	}).setVarArgs();
 	public static final Command GOTO = overload("goto", CALL, "No difference, but exists for temporary backwards compatibility.", (objs) -> objs, CALL.args).setVarArgs();
+	public static final Command EXEC = add("exec", "Executable", "Creates and returns an Executable Reference that will execute in a new scope after setting the given variable values.", CmdArg.SVEXEC, CmdArg.VARIABLE).setFunc((ctx, objs) ->
+	{
+		SVExec ex = (SVExec) objs[0];
+		Variable[] vars = (Variable[]) objs[1];
+		return new SVExec(ex.input, ex.modless, ex.selfCtx.get(), ex.runCtx, vars);
+	}).setVarArgs();
 	public static final Command RETURN = add("return", "Variable", "Marks the end of a label or code section. If present, will set PREV to argument, or array of arguments if more than one is provided.", CmdArg.SCAJL_VARIABLE).setFunc((ctx, objs) ->
 	{
 		ScajlVariable[] rets = (ScajlVariable[]) objs[0];

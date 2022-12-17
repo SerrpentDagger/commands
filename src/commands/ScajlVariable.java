@@ -49,7 +49,7 @@ public abstract class ScajlVariable
 		if (off < memberAccess.length)
 		{
 			String val = getVar(memberAccess[off], false, ctx, selfCtx.get()).val(ctx);
-			if (val.equals(Scajl.ARR_SELF))
+			if (val.equals(Scajl.ARR_UP))
 				return selfCtx(memberAccess, off, put, ctx);
 		}
 		if (put || memberAccess != null && off != memberAccess.length)
@@ -59,7 +59,7 @@ public abstract class ScajlVariable
 	protected VarCtx selfCtx(String[] memberAccess, int off, boolean put, Scajl ctx)
 	{
 		if (put && off == memberAccess.length - 1)
-			ctx.parseExcept("Invalid index: " + Scajl.ARR_SELF, "Cannot set the '" + Scajl.ARR_SELF + "' value of a variable directly");
+			ctx.parseExcept("Invalid index: " + Scajl.ARR_UP, "Cannot set the '" + Scajl.ARR_UP + "' value of a variable directly");
 		else
 		{
 			SVMember self = selfCtx.get();
@@ -68,7 +68,7 @@ public abstract class ScajlVariable
 				if (off == memberAccess.length - 1)
 					return NULL.varCtx(memberAccess, off, put, ctx);
 				else
-					ctx.parseExcept("Invalid usage of the '%s' keyword.".formatted(Scajl.ARR_SELF), "The indexed variable is not contained.");
+					ctx.parseExcept("Invalid usage of the '%s' keyword.".formatted(Scajl.ARR_UP), "The indexed variable is not contained.");
 			}
 			return self.varCtx(memberAccess, off + 1, put, ctx);
 		}
@@ -475,13 +475,15 @@ public abstract class ScajlVariable
 		@Override
 		public VarCtx varCtx(String[] memberAccess, int off, boolean put, Scajl ctx)
 		{
+			if (off == memberAccess.length)
+				return new VarCtx(() -> this);
 			SVMember self = selfCtx.get();
-			if (memberAccess[off].equals(Scajl.ARR_SELF))
+			if (memberAccess[off].equals(Scajl.ARR_UP))
 			{
 				if (off == memberAccess.length - 1)
 				{
 					if (put)
-						ctx.parseExcept("Invalid index: " + Scajl.ARR_SELF, "Cannot set the '" + Scajl.ARR_SELF + "' value of a variable directly");
+						ctx.parseExcept("Invalid index: " + Scajl.ARR_UP, "Cannot set the '" + Scajl.ARR_UP + "' value of a variable directly");
 					return new VarCtx(() -> self);
 				}
 				else
@@ -801,7 +803,7 @@ public abstract class ScajlVariable
 		public VarCtx memCtx(String[] memberAccess, int off, String accVal, boolean put, Scajl ctx)
 		{
 			String val = getVar(memberAccess[off], false, ctx, selfCtx.get()).val(ctx);
-			if (val.equals(Scajl.ARR_SELF))
+			if (val.equals(Scajl.ARR_UP))
 				return selfCtx(memberAccess, off, put, ctx);
 			if (put || memberAccess != null && off != memberAccess.length)
 				ctx.parseExcept("Invalid member access on Token Group", "The indexed variable is not a type which can be indexed.", "From access: " + StringUtils.toString(memberAccess, "", "" + Scajl.ARR_ACCESS, ""));
@@ -1050,9 +1052,19 @@ public abstract class ScajlVariable
 	
 	public static class SVExec extends ScajlVariable
 	{
-		public SVExec(String input, String modless, SVMember selfCtx)
+		protected final Scajl runCtx;
+		protected final Variable[] sets;
+		
+		public SVExec(String input, String modless, SVMember selfCtx, Scajl runCtx)
+		{
+			this(input, modless, selfCtx, runCtx, null);
+		}
+		
+		public SVExec(String input, String modless, SVMember selfCtx, Scajl runCtx, Variable[] sets)
 		{
 			super(input, modless, selfCtx);
+			this.runCtx = runCtx;
+			this.sets = sets;
 		}
 		
 		@Override
@@ -1064,13 +1076,23 @@ public abstract class ScajlVariable
 		@Override
 		public String val(Scajl ctx)
 		{
+			ctx = runCtx == null ? ctx : runCtx;
 			return eval(ctx).val(ctx);
 		}
 		
 		@Override
 		public ScajlVariable eval(Scajl ctx)
 		{
-			return ctx.runExecutable(modless, selfCtx.get()).output;
+			ctx = runCtx == null ? ctx : runCtx;
+			if (sets != null)
+			{
+				ctx.scope.push();
+				for (Variable set : sets)
+					ctx.scope.put(set.name, set.var);
+			}
+			ScajlVariable out = ctx.runExecutable(modless, selfCtx.get()).output;
+			ctx.scope.pop();
+			return out;
 		}
 
 		@Override
@@ -1094,7 +1116,7 @@ public abstract class ScajlVariable
 		@Override
 		public SVExec clone()
 		{
-			return new SVExec(input, modless, selfCtx.get());
+			return new SVExec(input, modless, selfCtx.get(), runCtx);
 		}
 		
 		@Override
@@ -1269,14 +1291,13 @@ public abstract class ScajlVariable
 		if (isRef)
 		{
 			if (isExec)
-				return new SVExec(input, modless, selfCtx);
+				return new SVExec(input, modless, selfCtx, ctx);
 			if (Scajl.ILLEGAL_VAR_MATCHER.matcher(modless).matches())
 				ctx.parseExcept("Illegal characters in reference name", "The reference name must be a legal variable name", "From input: " + input);
 			return new SVRef(input, modless);
 		}
-		if (modless.equals(Scajl.ARR_SELF))
+		if (modless.equals(Scajl.ARR_UP))
 			return selfCtx == null ? NULL : selfCtx;
-				//ctx.parseExcept("Illegal usage of the '%s' keyword.".formatted(Script.ARR_SELF), "'%s' can only be used within Container types", "From input: " + input);
 		
 		ScajlVariable var = ctx.scope.get(modless);
 		if (var == null)

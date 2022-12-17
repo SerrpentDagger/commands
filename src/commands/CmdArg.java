@@ -642,7 +642,7 @@ public abstract class CmdArg<T>
 			if (lab == null)
 				return null;
 			String callLab = "" + Scajl.SCOPE_S +  Scajl.CALL.name + " " + lab.name + Scajl.SCOPE_E;
-			return new SVExec("" + Scajl.REF + callLab, callLab, null);
+			return new SVExec("" + Scajl.REF + callLab, callLab, null, ctx);
 		}
 		
 		@Override

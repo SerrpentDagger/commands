@@ -57,7 +57,7 @@ public class Script
 	
 	@Expose
 	@Desc("Run this Script from the given label, using the given variables, and return the result.")
-	public ScajlVariable runFrom(String label, VarSet... sets)
+	public ScajlVariable call(String label, VarSet... sets)
 	{
 		Label lab = scajl.getLabel(label);
 		if (lab != null)
@@ -65,5 +65,18 @@ public class Script
 		else
 			ctx.parseExcept("Specified label does not exist", label, "Script: " + scajl.name);
 		return scajl.prev();
+	}
+	
+	@Expose
+	@Desc("Evaluates the given input in this imported Script.")
+	public ScajlVariable in(String input)
+	{
+		return scajl.getVar(input, false, null);
+	}
+	
+	@Override
+	public String toString()
+	{
+		return scajl.path;
 	}
 }

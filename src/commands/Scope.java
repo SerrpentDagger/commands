@@ -61,6 +61,12 @@ public class Scope
 		last.put(name, val);
 	}
 	
+	public void put(VarSet... sets)
+	{
+		for (VarSet set : sets)
+			put(set.var, set.set);
+	}
+	
 	public void makeGlobal(String name)
 	{
 		ScajlVariable was = last.vars.remove(name);
@@ -75,6 +81,11 @@ public class Scope
 	public void push(LabelTree to)
 	{
 		stack.add(last = new SNode(last, to));
+	}
+	
+	public void push()
+	{
+		push(last.label);
 	}
 	
 	public SNode pop()
