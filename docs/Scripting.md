@@ -4,6 +4,8 @@
 - [Comments](#comments)
 - [Labels and Scope](#labels-and-scope)
 - [Primitive Types](#scajl-primitive-types)
+- [Reference Modifiers](#reference-modifiers)
+- [Utility Commands](#utility-commands)
 
 # Scripting
 ## Ending a Script With ==
@@ -11,6 +13,9 @@ A Script can be ended by the end of a file, or in some way determined by the imp
 
 ## When in Doubt, ?
 '?' is a very useful symbol in Scajl. It causes help text to be printed about various constructs. If you enter '?' as a single line, it will give you an overview of the current structure of functionality exposed to the Scajl runtime, including global Commands, Object Types and Libraries. When used on a single element, it can give you information about a specific Command or Object Type.
+
+## Aborting Script Executtion
+Scajl Scripts are meant to be used for a variety of things, including mouse and keyboard manipulation. To this end, it is very easy to abort Script execution at any time. You can do so by simply moving your mouse to the top left corner of the moniter. The Script will then terminate before running the next Scajl Executable.
 
 ## Syntax
 Scajl is a command-based scripting language. The general syntax reflects this structure. An executable Command is composed of a Head, and an Argument list. These can further be broken down. There are then several expansions on this format, which allow for greater flexibility in scripting.
@@ -181,3 +186,26 @@ Enclosed as '\(val0 val1 ... valNm1\)'. Can be unpacked into Arguments with '^'.
 var a (b 2)
 var ^a // Sets b to 2.
 ```
+
+## Reference Modifiers
+Raw, unraw, etc.
+## Utility Commands
+There are many commands built into the default Scajl runtime environment, but these global utility ones will be very useful to the aspiring scripter. A brief overview will be mentioned below, but it is recommended that you view the technicalities further by querying the help documentation with '?' (See [When in Doubt](#when-in-doubt-)).
+### var, var_if..., var_array, var_array_fill
+These are examples of commands used to set variables and arrays in a simple way. You can set variables under certain conditions, and fill arrays by index using an executable.
+### test, enforce, enforce_one, assert
+These can be used to test and modify user input, ensuring it complies with the expectations of your function. They work by matching a variable with an expected structure, or filling it with your defaults where the input is incompatible.
+### pack
+This can also be used to adjust user input. It will pack an array to the desired dimensions, allowing the user to supply their information more intuitively, while allowing you to deal only with the highest level dimension.
+### echo, ~, exec, read, -
+These are very useful when it comes to running Member Commands and Executable References in a compact way. You should definitely read their help documentation.
+### of_type, get_type
+These can be used to query information about a variable, in case the above section is not flexible enough for your needs.
+### add, sub, mult..., not, or, and...
+Arithmetic and logical operations. These are grouped together in the help documentation, so you refer to that section of the list to see them all.
+### for, while, if, call
+Flow-control Commands. These have mostly been replaced by the inline formats (see [Command Head](#the-command-head)), but can still be useful. In particular, you should look at call and if.
+### runscr, runlab, impscr
+These are used for working with other Scripts. runscr and runlab will load a Script, run a portion of it, then unload the Script. Impscr will load a Script, and then return a handle to it so that you can work with it over the lifetime of your own Script. This can be used to create library Scripts for future use, which is discussed further below.
+### print, print_all_vars, print_debug
+These can be used for displaying text and debugging. print_all_vars and print_debug are particularly useful.
