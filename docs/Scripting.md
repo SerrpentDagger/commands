@@ -149,7 +149,7 @@ var a 2, b 3 // These are values.
 print {add a, b} // a and b are first interpereted as numbers (2 and 3), and then the output is read as a string ("5.0").
 ```
 ### Reference
-A Reference is created with the '@' symbol. In general, Scajl primitives are pass-by-value, except for Containers (see below). When you reference a Value, the value read from the Reference will be looked up when read, rather than set on creation. This difference is illustrated below.
+A Reference is created with the '@' symbol (see [Reference Modifiers](reference-modifiers)). In general, Scajl primitives are pass-by-value, except for Containers (see below). When you reference a Value, the value read from the Reference will be looked up when read, rather than set on creation. This difference is illustrated below.
 You can also reference Executables. When you do this, the value of the Executible will be looked up on use, thus calling the line of code at a later time. The variable context of the Executable Reference will be that in which it is called, not that in which it is created. Executable Reference brings us to the 'echo' command, which is useful for calling these in a standard way. '~' is a direct overload of 'echo', being simply a convenient abbreviation.
 #### Examples
 ```
