@@ -88,9 +88,10 @@ public class Scope
 		stack.add(last = to);
 	}
 	
-	public void push()
+	public void push(VarSet... sets)
 	{
 		push(last.label);
+		put(sets);
 	}
 	
 	public SNode pop()

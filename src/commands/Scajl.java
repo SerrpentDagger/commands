@@ -1169,6 +1169,14 @@ public class Scajl
 			return arrOf(rets);
 	}).setVarArgs();
 	public static final Command ECH = overload("~", ECHO, "Just a shorter name.", (objs) -> objs, ECHO.args).setVarArgs();
+	public static final Command READ = add("read", VALUE, "Pushes a new scope, sets the given variables, then reads the given variable. Useful for calling executables with local variables.", CmdArg.SVEXEC, CmdArg.VAR_SET).setFunc((ctx, objs) ->
+	{
+		SVExec ret = (SVExec) objs[0];
+		ctx = ret.runCtx == null ? ctx : ret.runCtx;
+		ctx.scope.push((VarSet[]) objs[1]);
+		return ret.eval(ctx);
+	}).setVarArgs();
+	public static final Command REA = overload("-", READ, "Just a shorter name.", (objs) -> objs, READ.args).setVarArgs();
 	public static final Command PACK = add("pack", TOKEN_ARR, "If the dimensions of the given array is less than the given, returns a new array packed to the given dimensions. Otherwise returns the given array.", CmdArg.combine(CmdArg.SCAJL_VARIABLE, CmdArg.INT_POSITIVE)).setFunc((ctx, objs) ->
 	{
 		Object[][] varInts = (Object[][]) objs[0];
@@ -1270,7 +1278,7 @@ public class Scajl
 	{
 		return new Object[] { objs[0], objs[1], false, false, objs[2] };
 	}, CmdArg.STRING, CmdArg.STRING, CmdArg.VAR_SET).setVarArgs();
-	public static final Command IMPSCR = add("impscr", "Script", "Import and return the Script of the given name.", CmdArg.STRING, CmdArg.VAR_SET).setFunc((ctx, objs) ->
+	public static final Command IMPSCR = add("impscr", "Script", "Import and return the Script of the given name. If present, the global IMPORT label of the Script will be run before return.", CmdArg.STRING, CmdArg.VAR_SET).setFunc((ctx, objs) ->
 	{
 		String name = (String) objs[0];
 		Script scr = new Script(ctx, name);
