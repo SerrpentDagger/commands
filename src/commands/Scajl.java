@@ -44,6 +44,7 @@ import javax.swing.JTextField;
 
 import annotations.Desc;
 import annotations.Expose;
+import annotations.JustGetter;
 import annotations.Name;
 import annotations.NoExpose;
 import annotations.Nullable;
@@ -67,7 +68,6 @@ import commands.ScajlVariable.SVVal;
 import commands.Scope.SNode;
 import commands.libs.Bool;
 import commands.libs.BuiltInLibs;
-import commands.libs.Script;
 import jbuilder.JBuilder;
 import mod.serpentdagger.artificialartificing.utils.group.MixedPair;
 import utilities.ArrayUtils;
@@ -144,7 +144,7 @@ public class Scajl
 	
 	public int parseLine = -1;
 //	private final HashMap<String, Label> labels = new HashMap<String, Label>();
-	private final LabelTree labelTree = new LabelTree(GLOBAL);
+	protected final LabelTree labelTree = new LabelTree(GLOBAL);
 	protected final Scope scope = new Scope(labelTree);
 	private final ArrayDeque<StackEntry> stack = new ArrayDeque<StackEntry>();
 	private StackEntry popped = null;
@@ -239,7 +239,7 @@ public class Scajl
 		String displayName = f.getDeclaringClass().getCanonicalName() + "." + fieldName;
 		
 		int mods = f.getModifiers();
-		boolean makeSetter = !Modifier.isFinal(mods);
+		boolean makeSetter = !Modifier.isFinal(mods) && !f.isAnnotationPresent(JustGetter.class);
 		boolean isInst = !Modifier.isStatic(mods);
 		
 		Command[] out = new Command[2];
@@ -1281,10 +1281,7 @@ public class Scajl
 	public static final Command IMPSCR = add("impscr", "Script", "Import and return the Script of the given name. If present, the global IMPORT label of the Script will be run before return.", CmdArg.STRING, CmdArg.VAR_SET).setFunc((ctx, objs) ->
 	{
 		String name = (String) objs[0];
-		Script scr = new Script(ctx, name);
-		LabelTree onImp = scr.scajl.labelTree.getFor(IMPORT_LABEL);
-		if (onImp != null)
-			scr.scajl.runFrom(onImp.root, (VarSet[]) objs[1]);
+		Script scr = new Script(ctx, name).imprt((VarSet[]) objs[1]);
 		return objOf(scr);
 	}).setVarArgs();
 	public static final Command EXIT = add("exit", VOID, "Exits the script runtime.").setFunc((ctx, objs) ->
@@ -2077,7 +2074,7 @@ public class Scajl
 	
 	public String getParseExceptString(String preAt, String postLine, String extra)
 	{
-		return preAt + " at line " + (parseLine + 1) + ": " + postLine + ", from: " + scope.getLast().getLabel().name + "." + stack.peek().to.root.name + " | " + lines[parseLine]
+		return preAt + " at line " + (parseLine + 1) + ": " + postLine + ", from: " + scope.getLast().getLabel().name + "." + (stack.isEmpty() ? GLOBAL.name : stack.peek().to.root.name + " | " + lines[parseLine])
 				+ (extra == null ? "." : ", extra info: " + extra);
 	}
 	

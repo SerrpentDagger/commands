@@ -1,4 +1,4 @@
-package commands.libs;
+package commands;
 
 import java.awt.AWTException;
 import java.io.File;
@@ -7,16 +7,19 @@ import java.io.FileNotFoundException;
 import annotations.Desc;
 import annotations.Expose;
 import annotations.Reluctant;
-import commands.Label;
-import commands.Scajl;
-import commands.ScajlVariable;
-import commands.VarSet;
+import commands.Scajl.ScajlException;
+import commands.Label.LabelTree;
 
 @Reluctant
 @Desc("A handle to a loaded Scajl script.")
 public class Script
 {
 	public final Scajl ctx, scajl;
+	
+	public Script(Scajl scajlIn)
+	{
+		this(null, scajlIn);
+	}
 	
 	public Script(Scajl ctx, String name)
 	{
@@ -43,8 +46,19 @@ public class Script
 	{
 		this.ctx = ctx;
 		this.scajl = scajlIn;
-		ctx.transferCallbacks(scajlIn);
-		scajl.putVar(Scajl.PARENT, Scajl.valOf(ctx.name));
+		if (ctx != null)
+		{
+			ctx.transferCallbacks(scajlIn);
+			scajl.putVar(Scajl.PARENT, Scajl.valOf(ctx.name));
+		}
+	}
+	
+	public Script imprt(VarSet... sets)
+	{
+		LabelTree onImp = scajl.labelTree.getFor(Scajl.IMPORT_LABEL);
+		if (onImp != null)
+			scajl.runFrom(onImp.root, sets);
+		return this;
 	}
 	
 	@Expose
@@ -63,7 +77,14 @@ public class Script
 		if (lab != null)
 			scajl.runFrom(lab, sets);
 		else
-			ctx.parseExcept("Specified label does not exist", label, "Script: " + scajl.name);
+		{
+			Scajl ctx = (this.ctx == null ? scajl : this.ctx);
+			String str = ctx.getParseExceptString("Specified label does not exist", label, "Script: " + scajl.name);
+			if (this.ctx == null)
+				ctx.getParseExceptionCallback().accept(new ScajlException(str), str);
+			else
+				throw new ScajlException(str);
+		}
 		return scajl.prev();
 	}
 	

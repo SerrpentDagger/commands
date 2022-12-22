@@ -30,6 +30,7 @@ import javax.swing.JToggleButton;
 import annotations.ScajlClone;
 import commands.CmdArg;
 import commands.Scajl;
+import commands.Script;
 import commands.ScriptObject;
 import jbuilder.JBuilder;
 import jbuilder.JBuilder.OnClose;
