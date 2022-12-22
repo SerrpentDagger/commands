@@ -2208,7 +2208,7 @@ public class Scajl
 				putLabel(firstToken(line), num);
 			else if (!line.isEmpty() && firstToken(line).equals(RETURN.name))
 				labelTree.close();
-			else if (startsWith(line, SCOPE_S))
+			else if (startsWith(line, SCOPE_S) && LEGAL_ANON_SCOPE_MATCHER.matcher(line).matches())
 			{
 				Label anon = new Label(SCOPED_LABEL + noScope.matcher(line).replaceFirst("") + "ANON" + anonScopeId++, num);
 		//		labels.put(anon.name, anon);
