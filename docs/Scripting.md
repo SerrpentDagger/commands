@@ -1,11 +1,23 @@
 # Contents
 - [Scripting](#scripting)
-- [Syntax](#syntax)
-- [Comments](#comments)
-- [Labels and Scope](#labels-and-scope)
-- [Primitive Types](#scajl-primitive-types)
-- [Reference Modifiers](#reference-modifiers)
-- [Utility Commands](#utility-commands)
+	- [Ending a Script](#ending-a-script-with-)
+	- [Help Queries](#when-in-doubt-)
+	- [Aborting Script Execution](#aborting-script-execution)
+	- [Syntax](#syntax)
+		- [Command Head](#the-command-head)
+		- [Argument List](#the-argument-list)
+	- [Comments](#comments)
+	- [Labels and Scope](#labels-and-scope)
+	- [Primitive Types](#scajl-primitive-types)
+		- [Value](#value)
+		- [Reference](#reference)
+		- [String](#string)
+		- [Object](#object)
+		- [Map](#map)
+		- [Array](#array)
+		- [TokenGroup](#tokengroup)
+	- [Reference Modifiers](#reference-modifiers)
+	- [Utility Commands](#utility-commands)
 
 # Scripting
 ## Ending a Script With ==
@@ -14,7 +26,7 @@ A Script can be ended by the end of a file, or in some way determined by the imp
 ## When in Doubt, ?
 '?' is a very useful symbol in Scajl. It causes help text to be printed about various constructs. If you enter '?' as a single line, it will give you an overview of the current structure of functionality exposed to the Scajl runtime, including global Commands, Object Types and Libraries. When used on a single element, it can give you information about a specific Command or Object Type.
 
-## Aborting Script Executtion
+## Aborting Script Execution
 Scajl Scripts are meant to be used for a variety of things, including mouse and keyboard manipulation. To this end, it is very easy to abort Script execution at any time. You can do so by simply moving your mouse to the top left corner of the moniter. The Script will then terminate before running the next Scajl Executable.
 
 ## Syntax
