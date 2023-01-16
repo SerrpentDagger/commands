@@ -291,7 +291,7 @@ public abstract class ScajlVariable
 		@Override
 		public boolean test(ScajlVariable other, Scajl ctx)
 		{
-			return other instanceof SVString;
+			return other instanceof SVString || other instanceof SVVal;
 		}
 		
 		@Override
