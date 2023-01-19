@@ -208,7 +208,7 @@ print map1.len // Prints the length (number of keys) of map1. (3)
 ### Array
 Arrays are Container Primitives that form a numerically indexed (from 0) array. They are read from and written to using indexing at the desired numbers. They can be constructed inplace, and modified later. To modify the length of an Array, you should set the 'len' index to the desired value. This will extend with 'null' or truncate, as appropriate.
 #### Variadics
-For Commands with variadic Argument count, you can use the contents of an Array as the Arguments by prefixing with '\#'. When you use an Array containing TokenGroups in this manner, the TokenGroups will be unpacked into the Arguments unless the Array was declared with the no-unpack '|' prefix.
+For Commands with variadic Argument count, you can use the contents of an Array as the Arguments by prefixing with '\#'. When you use an Array containing TokenGroups in this manner, the TokenGroups will be unpacked into the Arguments unless the Array or corresponding TokenGroup was declared with the no-unpack '|' prefix, unless the Command expects a TokenGroup as input. This allows Arrays to supply multitoken variadic Arguments.
 #### Examples
 ```
 // Simple variadic demo.
@@ -224,6 +224,24 @@ arr.len:var arr.INDEX INDEX // Fills the Array with increasing integers.
 print arr
 var arr.len 5 // Truncates the Array
 print arr
+```
+```
+// The 'no-unpack' modifier.
+var a (this is a token group) // Creates a TokenGroup with the given Tokens.
+var b [a] // Creates an Array containing the TokenGroup.
+print b // Prints the Array.
+print #b // Prints using the contents of b as the variadic arguments, auto-unpacking the TokenGroups into Arguments. As 'print ^a'.
+print #|&b // Prints using the no-unpack contents of b as the variadic argumetns. As 'print a'.
+
+var c &|a // Creates a no-unpack TokenGroup.
+var d [c] // Creates an Array containing the no-unpack TokenGroup.
+print #d== // Prints using the contents of d as the variadic arguments. c's declaration prevents auto-unpacking. As 'print c'.
+```
+```
+// Application of variadic auto-unpacking.
+var arr [(a 1); (b 2); (c 3)]
+var #arr
+print_all_vars
 ```
 ```
 // Extended Array beheviour.

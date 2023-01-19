@@ -731,22 +731,15 @@ public abstract class ScajlVariable
 		}
 	}
 	
-	public static class SVTokGroup extends SVMember
-	{
-		private ScajlVariable[] array;
-
-		public SVTokGroup(String input, String modless, Scajl ctx, SVMember selfCtx)
+	public static class SVTokGroup extends SVArray
+	{	
+		public SVTokGroup(String input, String modless, boolean noUnpack, Scajl ctx, SVMember selfCtx)
 		{
-			super(input, modless, selfCtx);
-			String[] elements = Scajl.tokensOf(Scajl.unpack(modless));
-			array = new ScajlVariable[elements.length];
-			for (int i = 0; i < elements.length; i++)
-				array[i] = getVar(elements[i], false, ctx);
+			super(input, modless, ArrayUtils.transform(Scajl.tokensOf(Scajl.unpack(modless)), (s) -> getVar(s, false, ctx)), noUnpack, selfCtx);
 		}
-		public SVTokGroup(String input, String modless, ScajlVariable[] array, SVMember selfCtx)
+		public SVTokGroup(String input, String modless, ScajlVariable[] array, boolean noUnpack, SVMember selfCtx)
 		{
-			super(input, modless, selfCtx);
-			this.array = array;
+			super(input, modless, array, noUnpack, selfCtx);
 		}
 		
 		@Override
@@ -760,6 +753,7 @@ public abstract class ScajlVariable
 		{
 			boolean remove = selfReference.add(this);
 			String out = "" + Scajl.TOK_S;
+			ScajlVariable[] array = getArray();
 			for (int i = 0; i < array.length; i++)
 				out += (selfReference.contains(array[i]) ? sRef(array[i]) :
 								(array[i] instanceof SVMember ? ((SVMember) array[i]).raw(selfReference)
@@ -771,10 +765,10 @@ public abstract class ScajlVariable
 		}
 		
 		@Override
-		protected SVMember clone(int noUnpack, HashMap<SVMember, SVMember> selfReference)
+		public SVArray clone(int noUnpack, HashMap<SVMember, SVMember> selfReference)
 		{
 			ScajlVariable[] deepCopy = Arrays.copyOf(array, array.length);
-			SVTokGroup clone = new SVTokGroup(input, modless, deepCopy, selfCtx.get());
+			SVTokGroup clone = new SVTokGroup(input, modless, deepCopy, val(noUnpack), selfCtx.get());
 			selfReference.put(this, clone);
 			for (int i = 0; i < deepCopy.length; i++)
 			{
@@ -813,11 +807,11 @@ public abstract class ScajlVariable
 		@Override
 		public Iterator<ScajlVariable> valueIterator()
 		{
-			return MapUtils.of(array);
+			return MapUtils.of(getArray());
 		}
 		
 		@Override
-		public <T extends SVMember> T packTo(int dimensions)
+		public SVTokGroup packTo(int dimensions)
 		{
 			return null;
 		}
@@ -834,11 +828,6 @@ public abstract class ScajlVariable
 			if (!(other instanceof SVTokGroup))
 				return clone();
 			return null;
-		}
-		
-		public ScajlVariable[] getArray()
-		{
-			return array;
 		}
 		
 		@Override
@@ -858,7 +847,7 @@ public abstract class ScajlVariable
 	
 	public static class SVArray extends SVMember
 	{
-		private ScajlVariable[] array;
+		protected ScajlVariable[] array;
 		private SVVal length;
 		public final boolean noUnpack;
 		
@@ -1241,7 +1230,7 @@ public abstract class ScajlVariable
 			ctx.parseExcept("Illegal reference modifier", "The 'unpack' reference modifier is disallowed for this location", "From input: " + input);
 		int modCount = countTrues(mods);
 		if (modCount > 1 && !(noUnpack && isRawCont))
-			ctx.parseExcept("Invalid variable usage", "A maximum of 1 reference modifier is allowed per token, except for the '" + Scajl.NO_UNPACK + Scajl.RAW_CONTENTS + "' combination applied to an Array variable.", "From input: " + input);
+			ctx.parseExcept("Invalid variable usage", "A maximum of 1 reference modifier is allowed per token, except for the '" + Scajl.NO_UNPACK + Scajl.RAW_CONTENTS + "' combination applied to an Array or TokenGroup variable.", "From input: " + input);
 		if (!isRaw)
 		{
 			String[] arrAcc = Scajl.syntaxedSplit(input, "" + Scajl.ARR_ACCESS);
@@ -1286,7 +1275,7 @@ public abstract class ScajlVariable
 		if (isArray)
 			return new SVArray(input, modless, noUnpack, ctx, selfCtx);
 		if (isGroup)
-			return new SVTokGroup(input, modless, ctx, selfCtx);
+			return new SVTokGroup(input, modless, noUnpack, ctx, selfCtx);
 		if (isMap)
 			return new SVMap(input, modless, ctx, selfCtx);
 		if (isRef)

@@ -1,6 +1,5 @@
 package commands;
 
-import java.awt.Color;
 import java.lang.reflect.Array;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
@@ -360,33 +359,6 @@ public abstract class CmdArg<T>
 			return OBJECT.unparse(obj);
 		}
 	}.reg();
-
-	public static final CmdArg<Color> COLOR = new CmdArg<Color>("Red Green Blue", Color.class)
-	{
-		@Override
-		public int tokenCount()
-		{
-			return 3;
-		}
-		
-		@Override
-		public Color parse(String trimmed, String[] tokens, Scajl ctx)
-		{
-			Double r, g, b;
-			r = DOUBLE.parse(tokens, 0, ctx);
-			g = DOUBLE.parse(tokens, 1, ctx);
-			b = DOUBLE.parse(tokens, 2, ctx);
-			if (r == null || g == null || b == null)
-				return null;
-			return new Color(r.floatValue(), g.floatValue(), b.floatValue());
-		}
-		
-		@Override
-		public ScajlVariable unparse(Color obj)
-		{
-			return Scajl.tokenize(obj.getRed(), obj.getGreen(), obj.getBlue());
-		};
-	}.reg();
 	
 	public static final CmdArg<Long> LONG = new CmdArg<Long>("Long", Long.class)
 	{
@@ -410,7 +382,7 @@ public abstract class CmdArg<T>
 		{
 			try
 			{
-				return Math.round(Math.round(Double.parseDouble(trimmed)));
+				return Math.round(Math.round(DOUBLE.parse(trimmed)));
 			}
 			catch (NumberFormatException e)
 			{}
@@ -1358,7 +1330,7 @@ CmdArg.funcInterfaceOf(Pos3dVal.class, (matching) -> (pos) -> (double) matching.
 	private static <X> X parseArrayElement(CmdArg<X> arg, ScajlVariable elm, boolean noUnpack, Scajl ctx)
 	{
 		ScajlVariable[] eVars;
-		if (!noUnpack && elm instanceof SVTokGroup && !arg.cls.isAssignableFrom(SVTokGroup.class))
+		if (!noUnpack && elm instanceof SVTokGroup  && !((SVTokGroup) elm).noUnpack && !arg.cls.isAssignableFrom(SVTokGroup.class))
 			eVars = ((SVTokGroup) elm).getArray();
 		else
 			eVars = new ScajlVariable[] { elm };
