@@ -32,6 +32,11 @@ public interface ScajlClone<T>
 		REGISTRY.put(cls, cloner);
 	}
 	
+	public static void unsup(String name)
+	{
+		throw new UnsupportedOperationException('\'' + name + "' is unsupported on given Variable(s).");
+	}
+	
 	@FunctionalInterface
 	public static interface ScajlCloner<T>
 	{

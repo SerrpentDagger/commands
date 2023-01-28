@@ -50,7 +50,6 @@ import annotations.NoExpose;
 import annotations.Nullable;
 import annotations.Reluctant;
 import commands.CmdArg.TypeArg;
-import commands.CmdArg.VarCmdArg;
 import commands.Command.CommandResult;
 import commands.Command.RunnableCommand;
 import commands.Label.LabelTree;
@@ -120,8 +119,8 @@ public class Scajl
 	public static final String INDEX = "INDEX";
 	public static final int NO_LABEL = -2;
 	public static final Label GLOBAL = new Label("GLOBAL", -1, false, true, false);
-	public static final char UNRAW = '%', RAW = '$', REF = '@', RAW_CONTENTS = '&', UNPACK = '^', NO_UNPACK = '|';
-	/** unraw, raw, ref, rcont, unpack, no_unpack */
+	public static final char UNRAW = '%', RAW = '$', REF = '@', RAW_CONTENTS = '&', UNPACK = '^', NO_UNPACK = '|', UNRESOLVED = '*';
+	/** unraw, raw, ref, rcont, unpack, no_unpack, unresolved */
 	public static final String[] VALID_VAR_MODS = new String[] { "" + UNRAW, "" + RAW, "" + REF, "" + RAW_CONTENTS, "" + UNPACK, "" + NO_UNPACK };
 	
 	public static final String ILLEGAL_VAR_REG_EX = ".*[^\\w\\-]+.*";
@@ -133,7 +132,7 @@ public class Scajl
 	public static final String PARENTH_REG_EX = "[" + quote(TOK_S) + quote(TOK_E) + "]";
 	public static final Pattern PARENTH_MATCHER = Pattern.compile(PARENTH_REG_EX);
 	
-	public static final String BOOL = "boolean", VOID = "void", TOKEN = "token", TOKEN_ARR = ARR_S + TOKEN + ARR_E, STRING = "String", INT = "int", DOUBLE = "double", VALUE = "Value", OBJECT = "Object";
+	public static final String BOOL = "boolean", VOID = "void", TOKEN = "token", TOKEN_ARR = ARR_S + TOKEN + ARR_E, STRING = "String", INT = "int", DOUBLE = "double", VALUE = "Value", OBJECT = "Object", RET_VARIABLE = "Variable";
 	
 	//////////////// Files
 	public static final String HIDDEN_SCRIPT = "--";
@@ -843,7 +842,7 @@ public class Scajl
 		for (String var : vars)
 		{
 			ScajlVariable val = ctx.getVar(var, false, null);
-			if (val == null || CmdArg.DOUBLE.parse(val.val(ctx)) == null)
+			if (val == null || CmdArg.DOUBLE.parse(val, ctx) == null)
 				return FALSE;
 		}
 		return TRUE;
@@ -867,13 +866,11 @@ public class Scajl
 				return FALSE;
 		return TRUE;
 	}).setVarArgs();
-	public static final Command IS_OBJ = add("is_obj", BOOL, "Checks whether the token is a valid Object in the given Type.", CmdArg.TYPE, CmdArg.TOKEN).setFunc((ctx, objs) ->
+	public static final Command IS_OBJ = add("is_obj", BOOL, "Checks whether the token is a valid Object in the given Type.", CmdArg.TYPE, CmdArg.SCAJL_VARIABLE).setFunc((ctx, objs) ->
 	{
 		String type = (String) objs[0];
-		if (!OBJECTS.containsKey(type))
-			ctx.parseExcept("Unrecognized type", type);
 		
-		return boolOf(OBJECTS.get(type).isObject((String) objs[1]));
+		return boolOf(OBJECTS.get(type).isObject((ScajlVariable) objs[1], ctx));
 	});
 	public static final Command MERGE = add("merge_obj", TOKEN, "Merges the the given Object variables into a single multiclassed Object. If there is more than one value specified for a given Type hirearchy, the last provided will overwrite the previous ones.", CmdArg.SVJAVOBJ).setFunc((ctx, objs) ->
 	{
@@ -1021,9 +1018,9 @@ public class Scajl
 		}
 		return arrOf(outArr);
 	}).setVarArgs();
-	public static final Command ADD = add("add", DOUBLE, "Adds and returns the argument numbers.", CmdArg.DOUBLE).setFunc((ctx, objs) ->
+	public static final Command ADD = add("add", RET_VARIABLE, "Adds and returns the arguments, not inplace. This Command can be extended to arbitrary Types.", CmdArg.SCAJL_VARIABLE).setFunc((ctx, objs) ->
 	{
-		return numOf(operate((Object[]) objs[0], (all, next) -> all + next));
+		return operateSV((ScajlVariable[]) objs[0], false, ctx, ScajlVariable::add);
 	}).setVarArgs();
 	public static final Command SUB = add("sub", DOUBLE, "Subtracts and returns the argument numbers.", CmdArg.DOUBLE).setFunc((ctx, objs) ->
 	{
@@ -1417,6 +1414,18 @@ public class Scajl
 		public void key(int key, Scajl ctx, Object[] objs);
 	}
 	
+	private static ScajlVariable operateSV(ScajlVariable[] vars, boolean inpl, Scajl ctx, OperatorSV op)
+	{
+		ScajlVariable all = vars[0];
+		for (int i = 1; i < vars.length; i++)
+			all = op.operate(all, vars[i], inpl, ctx);
+		return all;
+	}
+	@FunctionalInterface
+	private static interface OperatorSV
+	{
+		public ScajlVariable operate(ScajlVariable all, ScajlVariable next, boolean inpl, Scajl ctx);
+	}
 	private static double operate(Object[] numArray, Operator op)
 	{
 		double all = (double) numArray[0];
@@ -1891,41 +1900,36 @@ public class Scajl
 	{
 		int count = arg.tokenCount();
 
-		MixedPair<String[], ScajlVariable[]> tokVarPair = tokVarPair(tokenRawDefault, arg instanceof VarCmdArg, selfCtx, (Object[]) tokens);
-		tokens = tokVarPair.a();
-		ScajlVariable[] vars = tokVarPair.b();
+		ScajlVariable[] vars = tokVars(tokenRawDefault, selfCtx, (Object[]) tokens);
 		
 		if (tokens.length != count)
 			parseExcept("Invalid token count", line, "Argument requires " + count + " tokens, but " + tokens.length + " have been provided. Tokens are separated by spaces.");
 		
-		T obj = arg.parse(tokens, vars, 0, this);
+		T obj = arg.parse(vars, 0, this);
 		
 		if (obj == null)
 			parseExcept("Invalid token resolution", StringUtils.toString(tokens, "", " ", ""), "Expected type: " + arg.type);
 		
 		return obj;
 	}
-	public MixedPair<String[], ScajlVariable[]> tokVarPair(IntPredicate tokenRawDefault, boolean unresolved, SVMember selfCtx, Object... preParse)
+	private ScajlVariable[] tokVars(IntPredicate tokenRawDefault, SVMember selfCtx, Object... preParse)
 	{
 		ScajlVariable[] vars = new ScajlVariable[preParse.length];
-		String[] tokens = new String[preParse.length];
 		for (int i = 0; i < vars.length; i++)
 		{
 			if (preParse[i] instanceof String)
 			{
 				ScajlVariable var = getVar((String) preParse[i], tokenRawDefault.test(i), selfCtx);
 				vars[i] = var;
-				tokens[i] = !unresolved ? vars[i].val(this) : vars[i].raw();
 			}
 			else if (preParse[i] instanceof ScajlVariable)
 			{
 				vars[i] = (ScajlVariable) preParse[i];
-				tokens[i] = vars[i].raw();
 			}
 			else
 				throw new IllegalArgumentException("Non-String, non-ScajlVariable parameter passed as preParsed values.");
 		}
-		return new MixedPair<>(tokens, vars);
+		return vars;
 	}
 	
 	private static String quote(String str)
@@ -2020,12 +2024,10 @@ public class Scajl
 								parseExcept("Invalid token count for CmdArg format '" + origArg.type + "'", line, "Format requires " + origArg.tokenCount() + " tokens, but " + preParse.length + " have been provided. Tokens are separated by spaces. From tokens: " + tokenSourceStr);
 							
 							final CmdArg<?> aarg = arg;
-							MixedPair<String[], ScajlVariable[]> tokVarPair = tokVarPair((i) -> cmd.rawArg[varArgInd] || aarg.rawToken(i), aarg instanceof VarCmdArg, selfCtx, preParse);
-							String[] tokens = tokVarPair.a();
-							trimmed = StringUtils.toString(tokens, "", " ", "");
-							ScajlVariable[] vars = tokVarPair.b();
+							ScajlVariable[] vars = tokVars((i) -> cmd.rawArg[varArgInd] || aarg.rawToken(i), selfCtx, preParse);
+							trimmed = StringUtils.toString(ArrayUtils.transform(vars, (v) -> v.raw()), "", " ", "");
 							
-							obj = arg.parse(tokens, vars, 0, this);
+							obj = arg.parse(vars, 0, this);
 							
 							if (obj == null && !cmd.nullableArg(varArgInd))
 								parseExcept("Invalid token resolution", trimmed, "Expected type: " + arg.type + ". From tokens: " + tokenSourceStr);
@@ -2038,13 +2040,11 @@ public class Scajl
 						else
 						{
 							final CmdArg<?> arrArg = cmd.variadic;
-							MixedPair<String[], ScajlVariable[]> tokVarPair = tokVarPair((i) -> false, true, selfCtx, preParse);
-							String[] tokens = tokVarPair.a();
-							ScajlVariable[] vars = tokVarPair.b();
-							trimmed = tokens[0];
-							obj = arrArg.parse(tokens, vars, 0, this);
+							ScajlVariable[] vars = tokVars((i) -> false, selfCtx, preParse);
+							obj = arrArg.parse(vars, 0, this);
+							trimmed = vars[0].raw();
 							if (obj == null && !cmd.nullableArg(argInd))
-								parseExcept("Invalid var-arg array resolution", trimmed, tokens[0]);
+								parseExcept("Invalid var-arg array resolution", trimmed, "Expected type: " + arrArg.type + ". From tokens: " + tokenSourceStr);
 							
 							objs[objs.length - 1] = obj;
 						}
@@ -2407,16 +2407,17 @@ public class Scajl
 		pushStack(lab);
 	}
 	
-	public boolean putVarType(String name, String val, CmdArg<?> type, String prompt)
+	public <T> boolean  putVarType(String name, String val, CmdArg<T> type, String prompt)
 	{
-		if (type.parse(val) == null)
+		T of = valParse(type, val, null, val);
+		if (of == null)
 		{
 			error("The input \"" + val + "\" for variable \"" + name + "\" is invalid for type \"" + prompt + "\".");
 			return false;
 		}
 		else
 		{
-			putVar(name, valOf(val));
+			putVar(name, type.unparse(of));
 			return true;
 		}
 	}
@@ -2477,6 +2478,16 @@ public class Scajl
 			test = test.replaceFirst(quote(valid[startsWith]), "");
 		}
 		return new MixedPair<boolean[], String>(out, test);
+	}
+	public static String prefixWithMods(String modless, boolean[] mask, String[] valid)
+	{
+		if (mask.length != valid.length)
+			throw new IllegalArgumentException("Mismatch of prefix mask and valid lengths.");
+		String pref = modless;
+		for (int i = 0; i < mask.length; i++)
+			if (mask[i])
+				pref = valid[i] + pref;
+		return pref;
 	}
 	private static int startsWithOneOf(String test, String[] valid)
 	{

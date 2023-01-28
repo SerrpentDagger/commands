@@ -8,7 +8,6 @@ import java.util.LinkedHashMap;
 
 import annotations.ScajlClone;
 import commands.CmdArg.ObjConstruct;
-import commands.CmdArg.VarCmdArg;
 import commands.ScajlVariable.SVJavObj;
 import mod.serpentdagger.artificialartificing.utils.group.MixedPair;
 import utilities.StringUtils;
@@ -34,10 +33,10 @@ public class ScriptObject<T>
 		this.description = description;
 		inlineConst = (CmdArg<T>[]) Array.newInstance(CmdArg.class, 0);
 		
-		cmdArg = new VarCmdArg<T>(typeName, cl)
+		cmdArg = new CmdArg<T>(typeName, cl)
 		{
 			@Override
-			public T parse(String[] tokens, ScajlVariable[] vars, int off, Scajl ctx)
+			public T parse(ScajlVariable[] vars, int off, Scajl ctx)
 			{
 				if (!(vars[off] instanceof SVJavObj))
 					return null;
@@ -61,14 +60,14 @@ public class ScriptObject<T>
 		return typeName + argRegID++;
 	}
 	
-	public boolean isObject(String trimmed)
+	public boolean isObject(ScajlVariable var, Scajl ctx)
 	{
-		return cmdArg.parse(trimmed) != null;
+		return cmdArg.parse(var, ctx) != null;
 	}
 	
-	public T getObject(String trimmed)
+	public T getObject(ScajlVariable var, Scajl ctx)
 	{
-		return cmdArg.parse(trimmed);
+		return cmdArg.parse(var, ctx);
 	}
 	
 	//////////

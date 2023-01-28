@@ -12,7 +12,11 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
+import annotations.ScajlArithmetic;
+import annotations.ScajlArithmetic.SArith;
 import annotations.ScajlClone;
+import annotations.ScajlLogical;
+import annotations.ScajlLogical.SLogic;
 import commands.ParseTracker.BoxTracker;
 import commands.ParseTracker.DelimTracker;
 import mod.serpentdagger.artificialartificing.utils.group.MixedPair;
@@ -21,13 +25,13 @@ import utilities.ArrayUtils.Ind;
 import utilities.MapUtils;
 import utilities.StringUtils;
 
-public abstract class ScajlVariable
+public abstract class ScajlVariable implements SArith<ScajlVariable>, SLogic<ScajlVariable>
 {
 	public static final SVVal NULL = new SVVal(Scajl.NULL, null);
 	
 	///////////////////////////
 	
-	public final String input, modless;
+	protected String input, modless;
 	protected WeakReference<SVMember> selfCtx;
 	
 	public ScajlVariable(String input, String modless, SVMember selfCtx)
@@ -89,13 +93,39 @@ public abstract class ScajlVariable
 	}
 	
 	@Override
+	public ScajlVariable sjClone()
+	{
+		return clone();
+	}
+	
+	@Override
 	public abstract ScajlVariable clone();
 	
 	public ScajlVariable clone(boolean noUnpack)
 	{
 		return clone();
 	}
-	//////////////////////
+	
+	/////////////////////
+	
+	@Override
+	public double valueD(Scajl ctx) { return Double.parseDouble(val(ctx)); }
+	@Override
+	public boolean valueB(Scajl ctx)
+	{
+		String b = val(ctx);
+		switch (b)
+		{
+			case "true":
+				return true;
+			case "false":
+				return false;
+			default:
+				throw new NumberFormatException("Malformed boolean input.");
+		}
+	}
+	
+	///////////////////////////////////////////////////////////////////////////////////
 	
 	public static class SVVal extends ScajlVariable
 	{
@@ -145,7 +175,7 @@ public abstract class ScajlVariable
 				if (other instanceof SVVal)
 				{
 					SVVal oth = (SVVal) other;
-					return other.equals(NULL) || CmdArg.BOOLEAN.parse(oth.modless) != null || CmdArg.DOUBLE.parse(oth.modless) != null;
+					return other.equals(NULL) || oth != null || CmdArg.DOUBLE.parse(oth, ctx) != null;
 				}
 				else
 					return true;
@@ -153,12 +183,12 @@ public abstract class ScajlVariable
 			if (!t)
 				return false;
 			SVVal oth = (SVVal) other;
-			Boolean b = CmdArg.BOOLEAN.parse(modless);
+			Boolean b = CmdArg.BOOLEAN.parse(this, ctx);
 			if (b != null)
-				return CmdArg.BOOLEAN.parse(oth.modless) != null;
-			Double d = CmdArg.DOUBLE.parse(modless);
+				return CmdArg.BOOLEAN.parse(oth, ctx) != null;
+			Double d = CmdArg.DOUBLE.parse(this, ctx);
 			if (d != null)
-				return CmdArg.DOUBLE.parse(oth.modless) != null;
+				return CmdArg.DOUBLE.parse(oth, ctx) != null;
 			return true;
 		}
 		
@@ -180,6 +210,22 @@ public abstract class ScajlVariable
 			if (!(other instanceof SVVal))
 				return false;
 			return ((SVVal) other).modless.equals(modless);
+		}
+
+		@Override
+		public SVVal setD(double to)
+		{
+			modless = Double.toString(to);
+			input = modless;
+			return this;
+		}
+
+		@Override
+		public SVVal setB(boolean to)
+		{
+			modless = Boolean.toString(to);
+			input = modless;
+			return this;
 		}
 	}
 	
@@ -252,11 +298,25 @@ public abstract class ScajlVariable
 				return false;
 			return ((SVRef) other).modless.equals(modless);
 		}
+
+		@Override
+		public ScajlVariable setD(double to)
+		{
+			ScajlClone.unsup("setD");
+			return this;
+		}
+
+		@Override
+		public ScajlVariable setB(boolean to)
+		{
+			ScajlClone.unsup("setB");
+			return this;
+		}
 	}
 	
 	public static class SVString extends ScajlVariable
 	{
-		public final String unraw;
+		protected String unraw;
 		
 		public SVString(String input, String modless, SVMember selfCtx)
 		{
@@ -314,6 +374,24 @@ public abstract class ScajlVariable
 			if (!(other instanceof SVString))
 				return false;
 			return ((SVString) other).unraw.equals(unraw);
+		}
+
+		@Override
+		public ScajlVariable setD(double to)
+		{
+			unraw = "" + to;
+			input = Scajl.STRING_CHAR + unraw + Scajl.STRING_CHAR;
+			modless = input;
+			return this;
+		}
+
+		@Override
+		public ScajlVariable setB(boolean to)
+		{
+			unraw = "" + to;
+			input = Scajl.STRING_CHAR + unraw + Scajl.STRING_CHAR;
+			modless = input;
+			return this;
 		}
 	}
 	
@@ -450,6 +528,24 @@ public abstract class ScajlVariable
 						return false;
 			}
 			return true;
+		}
+
+		@Override
+		public ScajlVariable setD(double to)
+		{
+			for (Object v : value)
+				if (v instanceof ScajlArithmetic<?>)
+					((ScajlArithmetic<?>) v).setD(to);
+			return this;
+		}
+
+		@Override
+		public ScajlVariable setB(boolean to)
+		{
+			for (Object v : value)
+				if (v instanceof ScajlLogical<?>)
+					((ScajlLogical<?>) v).setB(to);
+			return this;
 		}
 	}
 	
@@ -729,6 +825,29 @@ public abstract class ScajlVariable
 		{
 			return map;
 		}
+		
+		@Override
+		public ScajlVariable setD(double to)
+		{
+			tryCall(ScajlArithmetic.SETD, (sv) -> sv.setD(to));
+			return this;
+		}
+		
+		@Override
+		public ScajlVariable setB(boolean to)
+		{
+			tryCall(ScajlLogical.SETB, (sv) -> sv.setB(to));
+			return null;
+		}
+		
+		protected boolean tryCall(String name, Consumer<ScajlVariable> call)
+		{
+			ScajlVariable val = map.get(name);
+			if (val == null)
+				return false;
+			call.accept(val);
+			return true;
+		}
 	}
 	
 	public static class SVTokGroup extends SVArray
@@ -909,14 +1028,14 @@ public abstract class ScajlVariable
 			if (accVal.equals(Scajl.ARR_LEN) && off == memberAccess.length - 1)
 				return new VarCtx(() -> length, (var) ->
 				{
-					Integer len = CmdArg.INT.parse(var.val(ctx));
+					Integer len = CmdArg.INT.parse(var, ctx);
 					if (len == null)
 						ctx.parseExcept("Invalid token resolution for Array length", "Array lengths must be specified as numbers.");
 					resize(len);
 				});
 			else
 			{
-				Integer ind = CmdArg.INT.parse(accVal);
+				Integer ind = ScajlArithmetic.dumbParseI(accVal); // TODO: This doesn't seem very clever.
 				if (ind == null)
 					ctx.parseExcept("Invalid Array index: " + accVal, "Array indices must be numbers.", "From access: " + StringUtils.toString(memberAccess, "", "" + Scajl.ARR_ACCESS, ""));
 				if (ind < 0)
@@ -1037,7 +1156,123 @@ public abstract class ScajlVariable
 		{
 			return array;
 		}
+		
+		//////////////////////////////////// Interface
+		
+		@Override
+		public double valueD(Scajl ctx)
+		{
+			return array.length;
+		}
+		
+		@Override
+		public ScajlVariable setD(double to)
+		{
+			for (ScajlVariable var : array)
+				var.setD(to);
+			return this;
+		}
+		
+		@Override
+		public ScajlVariable setB(boolean to)
+		{
+			for (ScajlVariable var : array)
+				var.setB(to);
+			return this;
+		}
+		
+		@Override
+		public ScajlVariable add(double num, Scajl ctx)
+		{
+			for (ScajlVariable var : array)
+				var.add(num, ctx);
+			return this;
+		}
+		
+		@Override
+		public ScajlVariable add(ScajlVariable other, Scajl ctx)
+		{
+			if (other instanceof SVArray)
+			{
+				SVArray oth = (SVArray) other;
+				for (int i = 0; i < Math.min(array.length, oth.array.length); i++)
+					array[i].add(oth.array[i], ctx);
+				return this;
+			}
+			return add(other.valueD(ctx), ctx);
+		}
 	}
+	
+/*	public static class SVUnresolved extends ScajlVariable
+	{
+		private final ScajlVariable target;
+		
+		public SVUnresolved(String input, String modless, ScajlVariable target)
+		{
+			super(input, modless, target.selfCtx.get());
+			this.target = target;
+		}
+
+		@Override
+		public String type()
+		{
+			return "Unresolved";
+		}
+
+		@Override
+		public String val(Scajl ctx)
+		{
+			return target.val(ctx);
+		}
+
+		@Override
+		public ScajlVariable eval(Scajl ctx)
+		{
+			return target;
+		}
+
+		@Override
+		public String raw()
+		{
+			return Scajl.RAW + target.raw();
+		}
+
+		@Override
+		public boolean equals(Object other)
+		{
+			return target.equals(other);
+		}
+
+		@Override
+		public boolean test(ScajlVariable other, Scajl ctx)
+		{
+			return target.test(other, ctx);
+		}
+
+		@Override
+		public ScajlVariable enforce(ScajlVariable other, Scajl ctx)
+		{
+			return target.enforce(other, ctx);
+		}
+
+		@Override
+		public ScajlVariable clone()
+		{
+			return new SVUnresolved(input, modless, target);
+		}
+		
+		@Override
+		public ScajlVariable setD(double to)
+		{
+			return target.setD(to);
+		}
+		
+		@Override
+		public ScajlVariable setB(boolean to)
+		{
+			return target.setB(to);
+		}
+	}*/
 	
 	public static class SVExec extends ScajlVariable
 	{
@@ -1115,6 +1350,20 @@ public abstract class ScajlVariable
 			if (!(other instanceof SVExec))
 				return false;
 			return ((SVExec) other).modless.equals(modless);
+		}
+
+		@Override
+		public ScajlVariable setD(double to)
+		{
+			ScajlClone.unsup("setD");
+			return this;
+		}
+
+		@Override
+		public ScajlVariable setB(boolean to)
+		{
+			ScajlClone.unsup("setB");
+			return this;
 		}
 	}
 	
@@ -1214,7 +1463,7 @@ public abstract class ScajlVariable
 		if (input.equals(Scajl.NULL))
 			return NULL;
 		
-		boolean isNumber = CmdArg.DOUBLE.parse(input) != null;
+		boolean isNumber = ScajlArithmetic.dumbParse(input) != null;
 		if (isNumber)
 			return new SVVal(input, selfCtx);
 		MixedPair<boolean[], String> modPair = Scajl.prefixModsFrom(input, Scajl.VALID_VAR_MODS);
@@ -1226,22 +1475,26 @@ public abstract class ScajlVariable
 		boolean isRawCont = mods[3];
 		boolean isUnpack = mods[4];
 		boolean noUnpack = mods[5];
+		//boolean unresolved = mods[6];
 		if (isUnpack)
 			ctx.parseExcept("Illegal reference modifier", "The 'unpack' reference modifier is disallowed for this location", "From input: " + input);
 		int modCount = countTrues(mods);
 		if (modCount > 1 && !(noUnpack && isRawCont))
 			ctx.parseExcept("Invalid variable usage", "A maximum of 1 reference modifier is allowed per token, except for the '" + Scajl.NO_UNPACK + Scajl.RAW_CONTENTS + "' combination applied to an Array or TokenGroup variable.", "From input: " + input);
-		if (!isRaw)
-		{
-			String[] arrAcc = Scajl.syntaxedSplit(input, "" + Scajl.ARR_ACCESS);
-			if (arrAcc.length > 1)
-			{
-				ScajlVariable var = getVar(arrAcc[0], false, ctx, selfCtx);
-				return var.varCtx(arrAcc, 1, false, ctx).get.get();
-			}
-		}
-		else
+		if (isRaw)
 			return new SVVal(input, modless, selfCtx);
+
+	//	if (unresolved)
+	//	{
+	//		mods[6] = false;
+	//		return new SVUnresolved(input, modless, getVar(Scajl.prefixWithMods(modless, mods, Scajl.VALID_VAR_MODS), false, ctx, selfCtx));			
+	//	}
+		String[] arrAcc = Scajl.syntaxedSplit(input, "" + Scajl.ARR_ACCESS);
+		if (arrAcc.length > 1)
+		{
+			ScajlVariable var = getVar(arrAcc[0], false, ctx, selfCtx);
+			return var.varCtx(arrAcc, 1, false, ctx).get.get();
+		}
 		
 		boolean isString = modless.startsWith("" + Scajl.STRING_CHAR);
 		if (isString && !modless.endsWith("" + Scajl.STRING_CHAR))
