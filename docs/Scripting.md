@@ -18,6 +18,7 @@
 		- [TokenGroup](#tokengroup)
 	- [Reference Modifiers](#reference-modifiers)
 	- [Utility Commands](#utility-commands)
+	- [Library Scripts](#library-scripts)
 
 # Scripting
 ## Ending a Script With ==
@@ -308,3 +309,6 @@ Flow-control Commands. These have mostly been replaced by the inline formats (se
 These are used for working with other Scripts. runscr and runlab will load a Script, run a portion of it, then unload the Script. Impscr will load a Script, and then return a handle to it so that you can work with it over the lifetime of your own Script. This can be used to create library Scripts for future use, which is discussed further below.
 ### print, print_all_vars, print_debug
 These can be used for displaying text and debugging. print_all_vars and print_debug are particularly useful.
+
+## Library Scripts
+I lied. They aren't discussed below yet. Oops.
