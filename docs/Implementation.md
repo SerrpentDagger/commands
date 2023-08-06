@@ -14,7 +14,7 @@ The section will be left somewhat sparse for the time being, since I don't antic
 Either way, you can learn more about implementation through the Javadocs and source code's internal usage.
 
 ## Running Scripts
-There are two ways to run a script: simply running it, or loading it as a library. In the former, the script is loaded, run from the start, terminates, and is unloaded. In the latter, the script is loaded, its `IMPORT` Label is called, and it is returned as a Script Object. You may then call its Labels from Java until you no longer need it.
+There are two ways to run a script: simply running it, or loading it as a library. In the former, the script is loaded, it runs from the start, and terminates. In the latter, the script is loaded, its `IMPORT` Label is called, and it is returned as a Script Object. You may then call its Labels from Java until you no longer need it.
 
 ## Exposing Functionality
 You'll probably want to add certain Objects and Classes into Scajl. This is easily done.
