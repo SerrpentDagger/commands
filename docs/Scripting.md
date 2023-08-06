@@ -22,6 +22,9 @@
 	- [Library Scripts](#library-scripts)
 
 # Scripting
+This section aims to inform the end user about how to write Scajl scripts, so that they can use it in applications implementing it.
+For information on how to implement Scajl into your application, take a look at [Implementation](docs/Implementation.md).
+
 ## Ending a Script With ==
 A Script can be ended by the end of a file, or in some way determined by the implementing application. But a Script can also always be ended by the `==` symbol. For example, when typing in the System input, the Script will stop requesting more lines when you end one with `==`. This can also be used to cut off chunks of Script from a file without deleting them.
 
