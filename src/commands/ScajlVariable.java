@@ -12,11 +12,7 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
-import annotations.ScajlArithmetic;
-import annotations.ScajlArithmetic.SArith;
 import annotations.ScajlClone;
-import annotations.ScajlLogical;
-import annotations.ScajlLogical.SLogic;
 import commands.ParseTracker.BoxTracker;
 import commands.ParseTracker.DelimTracker;
 import mod.serpentdagger.artificialartificing.utils.group.MixedPair;
@@ -25,7 +21,7 @@ import utilities.ArrayUtils.Ind;
 import utilities.MapUtils;
 import utilities.StringUtils;
 
-public abstract class ScajlVariable implements SArith<ScajlVariable>, SLogic<ScajlVariable>
+public abstract class ScajlVariable implements ScajlClone<ScajlVariable>
 {
 	public static final SVVal NULL = new SVVal(Scajl.NULL, null);
 	
@@ -108,7 +104,7 @@ public abstract class ScajlVariable implements SArith<ScajlVariable>, SLogic<Sca
 	
 	/////////////////////
 	
-	@Override
+/*	@Override
 	public double valueD(Scajl ctx) { return Double.parseDouble(val(ctx)); }
 	@Override
 	public boolean valueB(Scajl ctx)
@@ -123,7 +119,7 @@ public abstract class ScajlVariable implements SArith<ScajlVariable>, SLogic<Sca
 			default:
 				throw new NumberFormatException("Malformed boolean input.");
 		}
-	}
+	}*/
 	
 	///////////////////////////////////////////////////////////////////////////////////
 	
@@ -212,7 +208,7 @@ public abstract class ScajlVariable implements SArith<ScajlVariable>, SLogic<Sca
 			return ((SVVal) other).modless.equals(modless);
 		}
 
-		@Override
+/*		@Override
 		public SVVal setD(double to)
 		{
 			modless = Double.toString(to);
@@ -226,7 +222,7 @@ public abstract class ScajlVariable implements SArith<ScajlVariable>, SLogic<Sca
 			modless = Boolean.toString(to);
 			input = modless;
 			return this;
-		}
+		}*/
 	}
 	
 	public static class SVRef extends ScajlVariable
@@ -299,7 +295,7 @@ public abstract class ScajlVariable implements SArith<ScajlVariable>, SLogic<Sca
 			return ((SVRef) other).modless.equals(modless);
 		}
 
-		@Override
+/*		@Override
 		public ScajlVariable setD(double to)
 		{
 			ScajlClone.unsup("setD");
@@ -311,7 +307,7 @@ public abstract class ScajlVariable implements SArith<ScajlVariable>, SLogic<Sca
 		{
 			ScajlClone.unsup("setB");
 			return this;
-		}
+		}*/
 	}
 	
 	public static class SVString extends ScajlVariable
@@ -376,7 +372,7 @@ public abstract class ScajlVariable implements SArith<ScajlVariable>, SLogic<Sca
 			return ((SVString) other).unraw.equals(unraw);
 		}
 
-		@Override
+/*		@Override
 		public ScajlVariable setD(double to)
 		{
 			unraw = "" + to;
@@ -392,7 +388,7 @@ public abstract class ScajlVariable implements SArith<ScajlVariable>, SLogic<Sca
 			input = Scajl.STRING_CHAR + unraw + Scajl.STRING_CHAR;
 			modless = input;
 			return this;
-		}
+		}*/
 	}
 	
 	public static class SVJavObj extends ScajlVariable
@@ -530,7 +526,7 @@ public abstract class ScajlVariable implements SArith<ScajlVariable>, SLogic<Sca
 			return true;
 		}
 
-		@Override
+/*		@Override
 		public ScajlVariable setD(double to)
 		{
 			for (Object v : value)
@@ -546,7 +542,7 @@ public abstract class ScajlVariable implements SArith<ScajlVariable>, SLogic<Sca
 				if (v instanceof ScajlLogical<?>)
 					((ScajlLogical<?>) v).setB(to);
 			return this;
-		}
+		}*/
 	}
 	
 	protected static abstract class SVMember extends ScajlVariable
@@ -826,7 +822,7 @@ public abstract class ScajlVariable implements SArith<ScajlVariable>, SLogic<Sca
 			return map;
 		}
 		
-		@Override
+/*		@Override
 		public ScajlVariable setD(double to)
 		{
 			tryCall(ScajlArithmetic.SETD, (sv) -> sv.setD(to));
@@ -838,7 +834,7 @@ public abstract class ScajlVariable implements SArith<ScajlVariable>, SLogic<Sca
 		{
 			tryCall(ScajlLogical.SETB, (sv) -> sv.setB(to));
 			return null;
-		}
+		}*/
 		
 		protected boolean tryCall(String name, Consumer<ScajlVariable> call)
 		{
@@ -1035,7 +1031,8 @@ public abstract class ScajlVariable implements SArith<ScajlVariable>, SLogic<Sca
 				});
 			else
 			{
-				Integer ind = ScajlArithmetic.dumbParseI(accVal); // TODO: This doesn't seem very clever.
+//				Integer ind = ScajlArithmetic.dumbParseI(accVal); // TODO: This doesn't seem very clever.
+				Integer ind = CmdArg.dumbParseI(accVal);
 				if (ind == null)
 					ctx.parseExcept("Invalid Array index: " + accVal, "Array indices must be numbers.", "From access: " + StringUtils.toString(memberAccess, "", "" + Scajl.ARR_ACCESS, ""));
 				if (ind < 0)
@@ -1159,37 +1156,37 @@ public abstract class ScajlVariable implements SArith<ScajlVariable>, SLogic<Sca
 		
 		//////////////////////////////////// Interface
 		
-		@Override
+/*		@Override
 		public double valueD(Scajl ctx)
 		{
 			return array.length;
-		}
+		}*/
 		
-		@Override
+/*		@Override
 		public ScajlVariable setD(double to)
 		{
 			for (ScajlVariable var : array)
 				var.setD(to);
 			return this;
-		}
+		}*/
 		
-		@Override
+/*		@Override
 		public ScajlVariable setB(boolean to)
 		{
 			for (ScajlVariable var : array)
 				var.setB(to);
 			return this;
-		}
+		}*/
 		
-		@Override
+/*		@Override
 		public ScajlVariable add(double num, Scajl ctx)
 		{
 			for (ScajlVariable var : array)
 				var.add(num, ctx);
 			return this;
-		}
+		} */
 		
-		@Override
+/*		@Override
 		public ScajlVariable add(ScajlVariable other, Scajl ctx)
 		{
 			if (other instanceof SVArray)
@@ -1200,7 +1197,7 @@ public abstract class ScajlVariable implements SArith<ScajlVariable>, SLogic<Sca
 				return this;
 			}
 			return add(other.valueD(ctx), ctx);
-		}
+		}*/
 	}
 	
 /*	public static class SVUnresolved extends ScajlVariable
@@ -1352,7 +1349,7 @@ public abstract class ScajlVariable implements SArith<ScajlVariable>, SLogic<Sca
 			return ((SVExec) other).modless.equals(modless);
 		}
 
-		@Override
+/*		@Override
 		public ScajlVariable setD(double to)
 		{
 			ScajlClone.unsup("setD");
@@ -1364,7 +1361,7 @@ public abstract class ScajlVariable implements SArith<ScajlVariable>, SLogic<Sca
 		{
 			ScajlClone.unsup("setB");
 			return this;
-		}
+		}*/
 	}
 	
 	////////////////////////
@@ -1463,7 +1460,7 @@ public abstract class ScajlVariable implements SArith<ScajlVariable>, SLogic<Sca
 		if (input.equals(Scajl.NULL))
 			return NULL;
 		
-		boolean isNumber = ScajlArithmetic.dumbParse(input) != null;
+		boolean isNumber = CmdArg.dumbParse(input) != null;
 		if (isNumber)
 			return new SVVal(input, selfCtx);
 		MixedPair<boolean[], String> modPair = Scajl.prefixModsFrom(input, Scajl.VALID_VAR_MODS);

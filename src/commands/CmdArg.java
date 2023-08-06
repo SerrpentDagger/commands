@@ -410,13 +410,7 @@ public abstract class CmdArg<T>
 		@Override
 		public Double parse(ScajlVariable[] vars, int off, Scajl ctx)
 		{
-			try
-			{
-				return vars[off].valueD(ctx);
-			}
-			catch (NumberFormatException e)
-			{}
-			return null;
+			return dumbParse(vars[off].val(ctx));
 		}
 	}.reg();
 	
@@ -618,13 +612,15 @@ public abstract class CmdArg<T>
 		@Override
 		public Boolean parse(ScajlVariable[] vars, int off, Scajl ctx)
 		{
-			try
+			switch (vars[off].val(ctx))
 			{
-				return vars[off].valueB(ctx);
+				case "true":
+					return true;
+				case "false":
+					return false;
+				default:
+					return null;
 			}
-			catch (NumberFormatException e)
-			{}
-			return null;
 		}
 	}.reg();
 		
@@ -1243,5 +1239,22 @@ CmdArg.funcInterfaceOf(Pos3dVal.class, (matching) -> (pos) -> (double) matching.
 		if (val == null)
 			ctx.parseExcept("Invalid Array element resolution", "Expected type '" + elmArg.type + "'", "Input tokens: " + StringUtils.toString(eVars, (v) -> v.toString(), "'", " ", "'"));
 		return val;
+	}
+	
+	public static Double dumbParse(String input)
+	{
+		try
+		{
+			return Double.parseDouble(input);
+		}
+		catch (NumberFormatException e)
+		{}
+		return null;
+	}
+	
+	public static Integer dumbParseI(String input)
+	{
+		Double d = dumbParse(input);
+		return d == null ? null : Math.round(Math.round(d));
 	}
 }

@@ -1018,9 +1018,11 @@ public class Scajl
 		}
 		return arrOf(outArr);
 	}).setVarArgs();
-	public static final Command ADD = add("add", RET_VARIABLE, "Adds and returns the arguments, not inplace. This Command can be extended to arbitrary Types.", CmdArg.SCAJL_VARIABLE).setFunc((ctx, objs) ->
+	public static final Command ADD = add("add", RET_VARIABLE, "Adds and returns the argument numbers.", CmdArg.DOUBLE).setFunc((ctx, objs) ->
 	{
-		return operateSV((ScajlVariable[]) objs[0], false, ctx, ScajlVariable::add);
+		Object[] arr = (Object[]) objs[0];
+		return numOf(operate(arr, (all, next) -> all + next));
+		//return operateSV((ScajlVariable[]) objs[0], false, ctx, ScajlVariable::add);
 	}).setVarArgs();
 	public static final Command SUB = add("sub", DOUBLE, "Subtracts and returns the argument numbers.", CmdArg.DOUBLE).setFunc((ctx, objs) ->
 	{
