@@ -1,7 +1,7 @@
 # Overview
 Scajl (pronounced as 'scale') is an easy-to-implement, easy-to-learn scripting language for developers that wish to expose arbitrary script capability to their users.
 
-Scajl provides a lightweight framework for running script logic, as well as functions that expose custom structure to the script environment either explicitly or automatically. The automatic exposition is what sets Scajl apart from other languages — allowing script implementation of arbitrary Java logic with a single function call. No longer must you painstakingly define each aspect of an object's data and conversions function-by-function!
+Scajl provides a lightweight framework for running script logic, as well as functions that expose custom structure to the script environment either explicitly or automatically. The automatic exposition is what sets Scajl apart from other languages — allowing script implementation of arbitrary Java logic with a single function call. *No longer must you painstakingly define each aspect of an object's data and conversions function-by-function!*
 
 Excellent syntax highlighting can be achieved in Notepad++ with the use of the language file provided in the releases.
 
