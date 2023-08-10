@@ -1,9 +1,21 @@
+/**
+ * This file is part of Scajl, which is a scripting language for Java applications.
+ * Copyright (c) 2023, SerpentDagger (MRRH) <serpentdagger.contact@gmail.com>.
+ * 
+ * Scajl is free software: you can redistribute it and/or modify it under the terms of the
+ * GNU Lesser General Public License as published by the Free Software Foundation, either
+ * version 3 of the License, or (at your option) any later version.
+ * 
+ * Scajl is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+ * without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
+ * PURPOSE. See the GNU Lesser General Public License for more details.
+ * 
+ * You should have received a copy of the GNU Lesser General Public License along with Scajl.
+ * If not, see <https://www.gnu.org/licenses/>.
+ */
+
 package commands.libs;
 
-import java.awt.Component;
-import java.awt.FlowLayout;
-import java.awt.Font;
-import java.awt.GridLayout;
 import java.lang.reflect.Field;
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -21,23 +33,11 @@ import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import javax.swing.JButton;
-import javax.swing.JComboBox;
-import javax.swing.JComponent;
-import javax.swing.JTextField;
-import javax.swing.JToggleButton;
-
 import annotations.ScajlClone;
 import commands.CmdArg;
 import commands.Scajl;
 import commands.Script;
 import commands.ScriptObject;
-import jbuilder.JBuilder;
-import jbuilder.JBuilder.OnClose;
-import main.Timer;
-import utilities.Parallelizer;
-import utilities.Parallelizer.ByThread;
-import utilities.Parallelizer.ThreadFill;
 
 public class BuiltInLibs
 {
@@ -99,7 +99,7 @@ public class BuiltInLibs
 			ScajlClone.reg(BigDecimal.class, (bd) -> new BigDecimal(bd.unscaledValue(), bd.scale()));
 		});
 		Scajl.add("Array", () -> Scajl.expose(Array.class, true));
-		Scajl.add("JBuilder", () -> 
+/*		Scajl.add("JBuilder", () -> 
 		{
 			CmdArg.funcInterfaceOf(OnClose.class, (match) -> (b) -> match.run(b));
 			ScriptObject<?>[] exp = Scajl.exposeDeclaredBy
@@ -115,14 +115,14 @@ public class BuiltInLibs
 					JBuilder.class
 			);
 			Scajl.exposeMethodsByName(JComponent.class, exp[exp.length - 1], false, "setFont");
-		});
-		Scajl.add("Timer", () -> Scajl.expose(Timer.class, true));
-		Scajl.add("Multithread", () ->
+		});*/
+//		Scajl.add("Timer", () -> Scajl.expose(Timer.class, true));
+/*		Scajl.add("Multithread", () ->
 		{
 			CmdArg.funcInterfaceOf(ThreadFill.class, (match) -> (th) -> match.run(th));
 			CmdArg.funcInterfaceOf(ByThread.class, (match) -> (ind) -> match.run(ind));
 			Scajl.expose(Parallelizer.class, false);
-		});
+		});*/
 		
 		Scajl.expose(Script.class, false);
 	}

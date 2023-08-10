@@ -1,0 +1,6 @@
+# This is the official list of Scajl authors with copyright claim on any portion of the Scajl source code.
+# Individual files should include the names of all authors.
+
+############################################################ List Begin:
+
+SerpentDagger (MRRH) <serpentdagger.contact@gmail.com>
