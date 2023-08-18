@@ -1,8 +1,8 @@
 Note that the preferred method for contributing to Scajl is through
-collaborative use of its GitHub page (e.g: submitting issues or
-pull requests). This best preserves authorship information and
-convenience for its users, and makes your contribution visible and
-accessible.
+collaborative use of its GitHub page at <https://github.com/SerrpentDagger/commands/>
+(e.g: submitting issues or pull requests). This best preserves authorship
+information and convenience for its users, and makes your contribution
+visible and accessible.
 
 #####################################################################
 
