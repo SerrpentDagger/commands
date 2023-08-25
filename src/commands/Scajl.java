@@ -1432,13 +1432,13 @@ public class Scajl
 		public void key(int key, Scajl ctx, Object[] objs);
 	}
 	
-	private static ScajlVariable operateSV(ScajlVariable[] vars, boolean inpl, Scajl ctx, OperatorSV op)
+/*	private static ScajlVariable operateSV(ScajlVariable[] vars, boolean inpl, Scajl ctx, OperatorSV op)
 	{
 		ScajlVariable all = vars[0];
 		for (int i = 1; i < vars.length; i++)
 			all = op.operate(all, vars[i], inpl, ctx);
 		return all;
-	}
+	}*///TODO:
 	@FunctionalInterface
 	private static interface OperatorSV
 	{
@@ -1826,6 +1826,10 @@ public class Scajl
 	public static String firstToken(String line)
 	{
 		return syntaxedSplit(line, "\\s", 1, 2)[0];
+	}
+	public static boolean endsLabel(String line)
+	{
+		return !line.isEmpty() && firstToken(line).equals(RETURN.name);
 	}
 	public static String[] arrayElementsOf(String array)
 	{
@@ -2224,7 +2228,7 @@ public class Scajl
 			String line = stripComments(scan.nextLine());
 			if (line.startsWith(LABEL) || line.startsWith(SCOPED_LABEL))
 				putLabel(firstToken(line), num);
-			else if (!line.isEmpty() && firstToken(line).equals(RETURN.name))
+			else if (endsLabel(line))
 				labelTree.close();
 			else if (startsWith(line, SCOPE_S) && LEGAL_ANON_SCOPE_MATCHER.matcher(line).matches())
 			{
@@ -2334,7 +2338,7 @@ public class Scajl
 							break;
 					}
 				}
-				else if (new CmdHead(firstToken(line)).name.equals(RETURN.name))
+				else if (endsLabel(line))
 					labelsDeep--;
 			}
 			parseLine++;
@@ -2604,11 +2608,11 @@ public class Scajl
 		this.userRequestType = reqType;
 	}
 	
-	public void setDebugger(Debugger debug)
+	public void setDebugger(Debugger debug, boolean printingDebug)
 	{
 		debugger = debug;
 		oldDebug = debug;
-		printingDebug = false;
+		this.printingDebug = printingDebug;
 	}
 	
 	public void printDebug(boolean bool)
@@ -2671,7 +2675,7 @@ public class Scajl
 		to.setErrorCallback(getErrorCallback());
 		to.setExceptionCallback(getExceptionCallback());
 		to.setParseExceptionCallback(getParseExceptionCallback());
-		to.setDebugger(getDebugger());
+		to.setDebugger(getDebugger(), printingDebug());
 		to.setPrevCallback(getPrevCallback());
 		to.setForceKill(forceKill);
 		to.setUserReqestType(getUserReqType());

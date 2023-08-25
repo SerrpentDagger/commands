@@ -185,10 +185,7 @@ public abstract class ScajlVariable implements ScajlClone<ScajlVariable>
 		{
 			if (modless.equals("null"))
 				if (other instanceof SVVal)
-				{
-					SVVal oth = (SVVal) other;
-					return other.equals(NULL) || oth != null || CmdArg.DOUBLE.parse(oth, ctx) != null;
-				}
+					return other.equals(NULL) || CmdArg.BOOLEAN.parse(other, ctx) != null || CmdArg.DOUBLE.parse(other, ctx) != null;
 				else
 					return true;
 			boolean t = other instanceof SVVal && other != NULL;

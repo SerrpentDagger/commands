@@ -697,8 +697,8 @@ public abstract class CmdArg<T>
 		@Override
 		public Variable parse(ScajlVariable[] vars, int off, Scajl ctx)
 		{
-			ScajlVariable var = vars[off];
-			Variable out = new Variable(var, TOKEN.parse(vars, off, ctx));
+			String name = TOKEN.parse(vars[off], ctx);
+			Variable out = new Variable(ScajlVariable.getVar(name, false, ctx), name);
 			if (out.name == null)
 				return null;
 			return out;
