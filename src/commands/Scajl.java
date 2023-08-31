@@ -2289,10 +2289,50 @@ public class Scajl
 	}
 	public void run(VarSet... varSets)
 	{
+		keyIn = new Scanner(System.in);
+		runFrom(GLOBAL, varSets);
+	}
+	private int labelsDeep = 0;
+	public void runFrom(Label label, VarSet... varSets)
+	{
 		try
 		{
-			keyIn = new Scanner(System.in);
-			runFrom(GLOBAL, varSets);
+			pushStack(label);
+			for (VarSet var : varSets)
+				putVar(var.var, var.set);
+			if (keyIn == null)
+				keyIn = new Scanner(System.in);
+			
+			Bool breakIf = new Bool(false);
+			while(parseLine < lines.length && !stack.isEmpty() && !forceKill.get())
+			{
+				String line = lines[parseLine];
+				if (!line.isEmpty())
+				{
+					if (line.startsWith(LABEL) || line.startsWith(SCOPED_LABEL))
+						labelsDeep++;
+					else if (labelsDeep == 0)
+					{
+						if (line.equals(HELP_CHAR_STR))
+							PRINT_COMMANDS.func.cmd(this, (Object[]) null);
+						else if (startsWith(line, SCOPE_S) && LEGAL_ANON_SCOPE_MATCHER.matcher(line).matches())
+							scope.push(scope.getLast().getLabelTree().getFor(anonScope.get(parseLine)));
+						else if (endsWith(line, SCOPE_E) && LEGAL_ANON_SCOPE_MATCHER.matcher(line).matches())
+							scope.pop();
+						else
+						{
+							CommandResult res = runExecutable(line, breakIf, null);
+							if (res.shouldBreak)
+								break;
+						}
+					}
+					else if (endsLabel(line))
+						labelsDeep--;
+				}
+				parseLine++;
+				if (pollEvents != null)
+					pollEvents.run();
+			}
 		}
 		catch (ScajlException e)
 		{
@@ -2303,46 +2343,7 @@ public class Scajl
 			e.printStackTrace();
 			this.exceptionCallback.accept(e);
 		}
-	}
-	private int labelsDeep = 0;
-	public void runFrom(Label label, VarSet... varSets)
-	{
-		pushStack(label);
-		for (VarSet var : varSets)
-			putVar(var.var, var.set);
-		if (keyIn == null)
-			keyIn = new Scanner(System.in);
-		
-		Bool breakIf = new Bool(false);
-		while(parseLine < lines.length && !stack.isEmpty() && !forceKill.get())
-		{
-			if (pollEvents != null)
-				pollEvents.run();
-			String line = lines[parseLine];
-			if (!line.isEmpty())
-			{
-				if (line.startsWith(LABEL) || line.startsWith(SCOPED_LABEL))
-					labelsDeep++;
-				else if (labelsDeep == 0)
-				{
-					if (line.equals(HELP_CHAR_STR))
-						PRINT_COMMANDS.func.cmd(this, (Object[]) null);
-					else if (startsWith(line, SCOPE_S) && LEGAL_ANON_SCOPE_MATCHER.matcher(line).matches())
-						scope.push(scope.getLast().getLabelTree().getFor(anonScope.get(parseLine)));
-					else if (endsWith(line, SCOPE_E) && LEGAL_ANON_SCOPE_MATCHER.matcher(line).matches())
-						scope.pop();
-					else
-					{
-						CommandResult res = runExecutable(line, breakIf, null);
-						if (res.shouldBreak)
-							break;
-					}
-				}
-				else if (endsLabel(line))
-					labelsDeep--;
-			}
-			parseLine++;
-		}
+
 	}
 	protected CommandResult runExecutable(String executableLine, SVMember selfCtx)
 	{

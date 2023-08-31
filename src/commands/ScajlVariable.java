@@ -184,10 +184,7 @@ public abstract class ScajlVariable implements ScajlClone<ScajlVariable>
 		public boolean test(ScajlVariable other, Scajl ctx)
 		{
 			if (modless.equals("null"))
-				if (other instanceof SVVal)
-					return other.equals(NULL) || CmdArg.BOOLEAN.parse(other, ctx) != null || CmdArg.DOUBLE.parse(other, ctx) != null;
-				else
-					return true;
+				return true;
 			boolean t = other instanceof SVVal && other != NULL;
 			if (!t)
 				return false;
@@ -1422,7 +1419,6 @@ public abstract class ScajlVariable implements ScajlClone<ScajlVariable>
 	
 	public static boolean test(Variable var, ScajlVariable pat, Scajl ctx)
 	{
-		//return var.name != null && (!isVar(var.name, ctx) || !pat.test(var.var, ctx));
 		return var.name != null && isVar(var.name, ctx) && pat.test(var.var, ctx);
 	}
 	
