@@ -95,7 +95,7 @@ public abstract class ScajlVariable implements ScajlClone<ScajlVariable>
 		this.selfCtx = new WeakReference<SVMember>(selfCtx);
 		return this;
 	}
-	public abstract boolean test(ScajlVariable other, Scajl ctx);
+	protected abstract boolean test(ScajlVariable other, Scajl ctx);
 	public abstract ScajlVariable enforce(ScajlVariable other, Scajl ctx);
 	
 	@Override
@@ -1418,6 +1418,12 @@ public abstract class ScajlVariable implements ScajlClone<ScajlVariable>
 			{}
 			ctx.scope.put(name, var);
 		}
+	}
+	
+	public static boolean test(Variable var, ScajlVariable pat, Scajl ctx)
+	{
+		//return var.name != null && (!isVar(var.name, ctx) || !pat.test(var.var, ctx));
+		return var.name != null && isVar(var.name, ctx) && pat.test(var.var, ctx);
 	}
 	
 	public static boolean isVar(String input, Scajl ctx)

@@ -777,7 +777,7 @@ public class Scajl
 	public static final Command TEST = add("test", BOOL, "Returns true if each variable matches its corresponding Pattern.", CmdArg.VAR_PATTERN).setFunc((ctx, objs) ->
 	{
 		for (Object[] varPat : (Object[][]) objs[0])
-			if (!((ScajlVariable) varPat[1]).test(((Variable) varPat[0]).var, ctx))
+			if (!ScajlVariable.test((Variable) varPat[0], (ScajlVariable) varPat[1], ctx))
 				return FALSE;
 		return TRUE;
 	}).setVarArgs();
@@ -788,7 +788,7 @@ public class Scajl
 		{
 			Variable var = (Variable) varPat[0];
 			ScajlVariable pat = (ScajlVariable) varPat[1];
-			if (var.name != null && !pat.test(var.var, ctx))
+			if (!ScajlVariable.test(var, pat, ctx))
 			{
 				ctx.putVar(var.name, pat.enforce(var.var, ctx));
 				upd = true;
@@ -801,13 +801,13 @@ public class Scajl
 		Object[] varPat = (Object[]) objs[0];
 		Variable var = (Variable) varPat[0];
 		ScajlVariable pat = (ScajlVariable) varPat[1];
-		if (!pat.test(var.var, ctx))
+		if (!ScajlVariable.test(var, pat, ctx))
 		{
 			ctx.putVar(var.name, pat.enforce(var.var, ctx));
 			return TRUE;
 		}
 		for (ScajlVariable othPat : (ScajlVariable[]) objs[1])
-			if (!othPat.test(var.var, ctx))
+			if (!ScajlVariable.test(var, othPat, ctx))
 			{
 				ctx.putVar(var.name, othPat.enforce(var.var, ctx));
 				return TRUE;
@@ -820,7 +820,7 @@ public class Scajl
 		{
 			Variable var = (Variable) varPat[0];
 			ScajlVariable pat = (ScajlVariable) varPat[1];
-			if (!pat.test(var.var, ctx))
+			if (!ScajlVariable.test(var, pat, ctx))
 				ctx.parseExcept("Illegal variable value", "Variable named '" + var.name + "', with value '" + var.var.raw() + "' does not match the required Pattern defined by the default '" + pat.raw() + "'");
 		}
 		return ctx.prev();
